@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
+import axios from 'axios'
 import api from '../lib/axios'
 
 const AuthContext = createContext(null)
@@ -8,6 +9,12 @@ export function AuthProvider({ children }) {
     try { return JSON.parse(localStorage.getItem('user')) } catch { return null }
   })
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Ping backend to wake up Railway cold start before user tries to login
+    const base = import.meta.env.VITE_API_URL || '/api'
+    axios.get(`${base}/health`, { timeout: 15000 }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('token')
