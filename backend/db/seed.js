@@ -3,8 +3,9 @@ const db = require('./database');
 
 console.log('🌱 Seeding Vision database...');
 
-// Clear tables in dependency order
+// Clear tables in dependency order (trade_records first — references users)
 db.exec(`
+  DELETE FROM trade_records;
   DELETE FROM notifications;
   DELETE FROM pipeline_items;
   DELETE FROM pipeline_stages;

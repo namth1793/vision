@@ -4,11 +4,13 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Contracts from './pages/Contracts'
-import Orders from './pages/Orders'
+import Entry from './pages/Entry'
+import TradeContracts from './pages/TradeContracts'
+import TradeOrders from './pages/TradeOrders'
+import Quality from './pages/Quality'
+import Settlement from './pages/Settlement'
+import TradeCommissions from './pages/TradeCommissions'
 import Warehouse from './pages/Warehouse'
-import Debts from './pages/Debts'
-import Commissions from './pages/Commissions'
 import Files from './pages/Files'
 import Pipeline from './pages/Pipeline'
 import Expenses from './pages/Expenses'
@@ -29,11 +31,15 @@ function AppRoutes() {
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="contracts" element={<Contracts />} />
-        <Route path="orders" element={<Orders />} />
+        {/* XNK Trade System */}
+        <Route path="entry" element={<Entry />} />
+        <Route path="trade-contracts" element={<TradeContracts />} />
+        <Route path="trade-orders" element={<TradeOrders />} />
+        <Route path="quality" element={<Quality />} />
+        <Route path="settlement" element={<Settlement />} />
+        <Route path="trade-commissions" element={<TradeCommissions />} />
+        {/* Other modules */}
         <Route path="warehouse" element={<Warehouse />} />
-        <Route path="debts" element={<Debts />} />
-        <Route path="commissions" element={<Commissions />} />
         <Route path="files" element={<Files />} />
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="expenses" element={<Expenses />} />

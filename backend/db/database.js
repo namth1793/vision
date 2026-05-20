@@ -206,6 +206,74 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS trade_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Section 1: Contract Info
+    staff TEXT,
+    broker TEXT,
+    year INTEGER,
+    contract_no TEXT,
+    contract_date TEXT,
+    seller TEXT,
+    buyer TEXT,
+    status TEXT DEFAULT 'active',
+    ship_date TEXT,
+    qty REAL,
+    origin TEXT,
+    pol TEXT,
+    lbs REAL,
+    nut REAL,
+    price REAL,
+    retention REAL,
+    double_penalty REAL,
+    notes1 TEXT,
+    -- Section 2: Payment
+    advanced_payment REAL,
+    second_payment REAL,
+    final_settlement REAL,
+    -- Section 3: Shipment / Bill of Lading
+    line_loader TEXT,
+    bl_number TEXT,
+    eta_caimep TEXT,
+    eta_hcm TEXT,
+    eta_pod TEXT,
+    notes2 TEXT,
+    dhl_fedex_number TEXT,
+    dhl_delivered TEXT,
+    total_cont INTEGER,
+    cont_size TEXT,
+    bags TEXT,
+    gw_bl REAL,
+    nw_bl REAL,
+    advanced_paid_bl REAL,
+    -- Section 4: Quality Check
+    date_unload TEXT,
+    notes3 TEXT,
+    certificate_no TEXT,
+    date_certificate TEXT,
+    nw_bw REAL,
+    outturn_vina REAL,
+    nutcount_vina REAL,
+    outturn_claim_1to1 REAL,
+    outturn_claim_1to2 REAL,
+    -- Section 5: Settlement
+    dem_det REAL,
+    sto REAL,
+    other_fee1 REAL,
+    other_fee2 REAL,
+    notes6 TEXT,
+    -- Section 6: Commission
+    commission_rate REAL,
+    pay_on_behalf REAL,
+    notes7 TEXT,
+    fee_from_buyer REAL,
+    -- Meta
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
 `);
 
 module.exports = db;
