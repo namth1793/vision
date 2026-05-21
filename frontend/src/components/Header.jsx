@@ -5,10 +5,20 @@ import { useAuth } from '../context/AuthContext'
 import api from '../lib/axios'
 
 const pageTitles = {
-  '/dashboard': 'Dashboard', '/contracts': 'Quản Lý Hợp Đồng', '/orders': 'Đơn Hàng XNK',
-  '/warehouse': 'Kho Ngoại Quan', '/debts': 'Công Nợ & Thanh Toán', '/commissions': 'Hoa Hồng',
-  '/files': 'Quản Lý File', '/pipeline': 'Pipeline', '/expenses': 'Thu Chi Nội Bộ',
-  '/reports': 'Báo Cáo & Thống Kê', '/users': 'Quản Lý Người Dùng',
+  '/dashboard': 'Dashboard',
+  '/entry': 'Nhập Liệu XNK',
+  '/trade-contracts': 'Hợp Đồng',
+  '/trade-orders': 'Vận Chuyển / Bill of Lading',
+  '/quality': 'Kiểm Tra Chất Lượng',
+  '/settlement': 'Quyết Toán',
+  '/trade-commissions': 'Hoa Hồng',
+  '/history': 'Lịch Sử Hoạt Động',
+  '/warehouse': 'Kho Ngoại Quan',
+  '/files': 'Quản Lý File',
+  '/pipeline': 'Pipeline',
+  '/expenses': 'Thu Chi Nội Bộ',
+  '/reports': 'Báo Cáo & Thống Kê',
+  '/users': 'Quản Lý Người Dùng',
 }
 
 export default function Header({ onMenuClick }) {
@@ -35,7 +45,7 @@ export default function Header({ onMenuClick }) {
   }, [])
 
   const unread = notifications.filter(n => !n.read).length
-  const title = pageTitles[location.pathname] || 'Vision'
+  const title = pageTitles[location.pathname] || 'Vison'
 
   const markAllRead = async () => {
     await api.put('/notifications/read-all')

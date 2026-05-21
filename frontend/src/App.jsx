@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Entry from './pages/Entry'
+import History from './pages/History'
 import TradeContracts from './pages/TradeContracts'
 import TradeOrders from './pages/TradeOrders'
 import Quality from './pages/Quality'
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route path="dashboard" element={<Dashboard />} />
         {/* XNK Trade System */}
         <Route path="entry" element={<Entry />} />
+        <Route path="history" element={<History />} />
         <Route path="trade-contracts" element={<TradeContracts />} />
         <Route path="trade-orders" element={<TradeOrders />} />
         <Route path="quality" element={<Quality />} />

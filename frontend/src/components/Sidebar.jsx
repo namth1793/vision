@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, FileText, Ship, FlaskConical,
   Scale, DollarSign, Warehouse, FolderOpen, GitBranch, Receipt,
-  BarChart2, Users, Building2, X
+  BarChart2, Users, Building2, X, History
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -32,6 +32,7 @@ const navGroups = [
   {
     label: 'QUẢN LÝ',
     items: [
+      { to: '/history', label: 'Lịch Sử', icon: History, roles: ['admin','seller','broker','staff'] },
       { to: '/warehouse', label: 'Kho Ngoại Quan', icon: Warehouse, roles: ['admin','seller','staff'] },
       { to: '/files', label: 'Quản Lý File', icon: FolderOpen, roles: ['admin','seller','staff'] },
       { to: '/pipeline', label: 'Pipeline', icon: GitBranch, roles: ['admin','seller'] },
@@ -54,7 +55,7 @@ export default function Sidebar({ onClose }) {
             <Building2 size={20} className="text-white" />
           </div>
           <div>
-            <p className="font-bold text-white text-sm leading-tight">VISION XNK</p>
+            <p className="font-bold text-white text-sm leading-tight">VISON XNK</p>
             <p className="text-slate-400 text-xs">Hệ Thống Nội Bộ</p>
           </div>
         </div>

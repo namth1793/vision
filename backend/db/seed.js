@@ -5,6 +5,7 @@ console.log('🌱 Seeding Vision database...');
 
 // Clear tables in dependency order (trade_records first — references users)
 db.exec(`
+  DELETE FROM audit_logs;
   DELETE FROM trade_records;
   DELETE FROM notifications;
   DELETE FROM pipeline_items;

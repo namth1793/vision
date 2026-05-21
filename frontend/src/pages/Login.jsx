@@ -29,7 +29,7 @@ export default function Login() {
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-900/50">
             <Building2 size={32} className="text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">VISION</h1>
+          <h1 className="text-3xl font-bold text-white">VISON</h1>
           <p className="text-slate-400 mt-1 text-sm">Hệ Thống Quản Lý Xuất Nhập Khẩu</p>
         </div>
         <div className="bg-white rounded-2xl shadow-2xl p-8">

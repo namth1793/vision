@@ -3,7 +3,53 @@ const router = express.Router();
 const db = require('../db/database');
 const { authenticate } = require('../middleware/auth');
 
-// GET all trade records
+// ── Audit log helper ─────────────────────────────────────────────────────────
+function writeLog(action, record, user, oldRecord) {
+  try {
+    let summary = '';
+    let detail = '';
+
+    if (action === 'create') {
+      summary = `Nhập liệu mới HĐ "${record.contract_no || '—'}"`;
+      detail = JSON.stringify({
+        contract_no: record.contract_no,
+        seller: record.seller,
+        buyer: record.buyer,
+        qty: record.qty,
+        price: record.price,
+        status: record.status,
+      });
+    } else if (action === 'update') {
+      // Detect changed fields
+      const watched = ['contract_no','seller','buyer','status','qty','price','bl_number',
+        'nw_bl','nw_bw','outturn_claim_1to1','outturn_claim_1to2','final_settlement',
+        'commission_rate','dem_det','sto','other_fee1','other_fee2'];
+      const changes = [];
+      if (oldRecord) {
+        watched.forEach(k => {
+          const o = oldRecord[k], n = record[k];
+          if (String(o||'') !== String(n||'')) {
+            changes.push(`${k}: "${o||''}" → "${n||''}"`);
+          }
+        });
+      }
+      summary = `Cập nhật HĐ "${record.contract_no || '—'}"` +
+        (changes.length ? ` (${changes.length} trường)` : '');
+      detail = JSON.stringify({ changed: changes });
+    } else if (action === 'delete') {
+      summary = `Xóa HĐ "${record.contract_no || '—'}"`;
+      detail = JSON.stringify({ contract_no: record.contract_no, seller: record.seller, buyer: record.buyer });
+    }
+
+    db.prepare(`
+      INSERT INTO audit_logs (action, record_id, contract_no, user_id, user_name, user_role, summary, detail)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(action, record.id, record.contract_no || null,
+      user.id, user.name, user.role, summary, detail);
+  } catch (e) { /* log errors are non-fatal */ }
+}
+
+// ── GET all trade records ─────────────────────────────────────────────────────
 router.get('/', authenticate, (req, res) => {
   try {
     let query = 'SELECT * FROM trade_records';
@@ -15,14 +61,14 @@ router.get('/', authenticate, (req, res) => {
       params.push(s, s, s, s);
     }
     if (req.query.status) { conditions.push('status = ?'); params.push(req.query.status); }
-    if (req.query.year) { conditions.push('year = ?'); params.push(req.query.year); }
+    if (req.query.year)   { conditions.push('year = ?');   params.push(req.query.year); }
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY created_at DESC';
     res.json(db.prepare(query).all(...params));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET single trade record
+// ── GET single trade record ───────────────────────────────────────────────────
 router.get('/:id', authenticate, (req, res) => {
   try {
     const record = db.prepare('SELECT * FROM trade_records WHERE id = ?').get(req.params.id);
@@ -31,7 +77,7 @@ router.get('/:id', authenticate, (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST create trade record
+// ── POST create ───────────────────────────────────────────────────────────────
 router.post('/', authenticate, (req, res) => {
   try {
     const f = req.body;
@@ -72,14 +118,17 @@ router.post('/', authenticate, (req, res) => {
       f.commission_rate||null, f.pay_on_behalf||null, f.notes7||null, f.fee_from_buyer||null,
       req.user.id
     );
-    res.status(201).json(db.prepare('SELECT * FROM trade_records WHERE id=?').get(result.lastInsertRowid));
+    const created = db.prepare('SELECT * FROM trade_records WHERE id=?').get(result.lastInsertRowid);
+    writeLog('create', created, req.user, null);
+    res.status(201).json(created);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT update trade record
+// ── PUT update ────────────────────────────────────────────────────────────────
 router.put('/:id', authenticate, (req, res) => {
   try {
     const f = req.body;
+    const oldRecord = db.prepare('SELECT * FROM trade_records WHERE id=?').get(req.params.id);
     db.prepare(`
       UPDATE trade_records SET
         staff=?, broker=?, year=?, contract_no=?, contract_date=?, seller=?, buyer=?, status=?,
@@ -109,14 +158,18 @@ router.put('/:id', authenticate, (req, res) => {
       f.commission_rate||null, f.pay_on_behalf||null, f.notes7||null, f.fee_from_buyer||null,
       req.params.id
     );
-    res.json(db.prepare('SELECT * FROM trade_records WHERE id=?').get(req.params.id));
+    const updated = db.prepare('SELECT * FROM trade_records WHERE id=?').get(req.params.id);
+    writeLog('update', updated, req.user, oldRecord);
+    res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE trade record
+// ── DELETE ────────────────────────────────────────────────────────────────────
 router.delete('/:id', authenticate, (req, res) => {
   try {
+    const record = db.prepare('SELECT * FROM trade_records WHERE id=?').get(req.params.id);
     db.prepare('DELETE FROM trade_records WHERE id=?').run(req.params.id);
+    if (record) writeLog('delete', record, req.user, null);
     res.json({ message: 'Đã xóa bản ghi' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

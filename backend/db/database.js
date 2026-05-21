@@ -274,6 +274,20 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (created_by) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    record_id INTEGER,
+    contract_no TEXT,
+    user_id INTEGER,
+    user_name TEXT,
+    user_role TEXT,
+    summary TEXT,
+    detail TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
 `);
 
 module.exports = db;
