@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, FileText, Ship, FlaskConical,
   Scale, DollarSign, Warehouse, FolderOpen, GitBranch, Receipt,
-  BarChart2, Users, Building2, X, History
+  BarChart2, Users, Building2, X, History, PackageSearch, PackagePlus, Container, BookUser
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -16,7 +16,16 @@ const navGroups = [
   {
     label: 'NHẬP LIỆU XNK',
     items: [
-      { to: '/entry', label: 'Nhập Liệu', icon: ClipboardList, roles: ['admin','seller','broker','staff'], highlight: true },
+      { to: '/entry', label: 'Nhập Liệu (cũ)', icon: ClipboardList, roles: ['admin','seller','broker','staff'], highlight: true },
+    ]
+  },
+  {
+    label: 'BẢNG THEO DÕI',
+    items: [
+      { to: '/buyers', label: 'Khách Hàng', icon: BookUser, roles: ['admin','seller','broker','staff'] },
+      { to: '/import-entry', label: 'Bảng Nhập', icon: PackagePlus, roles: ['admin','seller','broker','staff'] },
+      { to: '/export-entry', label: 'Bảng Xuất', icon: PackageSearch, roles: ['admin','seller','broker','staff'] },
+      { to: '/bwh-entry', label: 'Kho Ngoại Quan', icon: Container, roles: ['admin','seller','staff'] },
     ]
   },
   {

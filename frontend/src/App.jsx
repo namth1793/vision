@@ -11,6 +11,10 @@ import TradeOrders from './pages/TradeOrders'
 import Quality from './pages/Quality'
 import Settlement from './pages/Settlement'
 import TradeCommissions from './pages/TradeCommissions'
+import Buyers from './pages/Buyers'
+import ImportEntry from './pages/ImportEntry'
+import ExportEntry from './pages/ExportEntry'
+import BwhEntry from './pages/BwhEntry'
 import Warehouse from './pages/Warehouse'
 import Files from './pages/Files'
 import Pipeline from './pages/Pipeline'
@@ -40,6 +44,12 @@ function AppRoutes() {
         <Route path="quality" element={<Quality />} />
         <Route path="settlement" element={<Settlement />} />
         <Route path="trade-commissions" element={<TradeCommissions />} />
+        {/* Buyers */}
+        <Route path="buyers" element={<Buyers />} />
+        {/* New XNK tables */}
+        <Route path="import-entry" element={<ImportEntry />} />
+        <Route path="export-entry" element={<ExportEntry />} />
+        <Route path="bwh-entry" element={<BwhEntry />} />
         {/* Other modules */}
         <Route path="warehouse" element={<Warehouse />} />
         <Route path="files" element={<Files />} />

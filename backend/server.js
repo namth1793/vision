@@ -49,6 +49,10 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/trades', require('./routes/trades'));
 app.use('/api/history', require('./routes/history'));
+app.use('/api/buyers', require('./routes/buyers'));
+app.use('/api/import-records', require('./routes/import_records'));
+app.use('/api/export-records', require('./routes/export_records'));
+app.use('/api/bwh-records', require('./routes/bwh_records'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
