@@ -4,13 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Entry from './pages/Entry'
 import History from './pages/History'
-import TradeContracts from './pages/TradeContracts'
-import TradeOrders from './pages/TradeOrders'
-import Quality from './pages/Quality'
-import Settlement from './pages/Settlement'
-import TradeCommissions from './pages/TradeCommissions'
 import Buyers from './pages/Buyers'
 import ImportEntry from './pages/ImportEntry'
 import ExportEntry from './pages/ExportEntry'
@@ -36,14 +30,7 @@ function AppRoutes() {
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        {/* XNK Trade System */}
-        <Route path="entry" element={<Entry />} />
         <Route path="history" element={<History />} />
-        <Route path="trade-contracts" element={<TradeContracts />} />
-        <Route path="trade-orders" element={<TradeOrders />} />
-        <Route path="quality" element={<Quality />} />
-        <Route path="settlement" element={<Settlement />} />
-        <Route path="trade-commissions" element={<TradeCommissions />} />
         {/* Buyers */}
         <Route path="buyers" element={<Buyers />} />
         {/* New XNK tables */}

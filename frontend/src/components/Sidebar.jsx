@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, ClipboardList, FileText, Ship, FlaskConical,
-  Scale, DollarSign, Warehouse, FolderOpen, GitBranch, Receipt,
+  LayoutDashboard, Warehouse, FolderOpen, GitBranch, Receipt,
   BarChart2, Users, Building2, X, History, PackageSearch, PackagePlus, Container, BookUser
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -14,28 +13,12 @@ const navGroups = [
     ]
   },
   {
-    label: 'NHẬP LIỆU XNK',
-    items: [
-      { to: '/entry', label: 'Nhập Liệu (cũ)', icon: ClipboardList, roles: ['admin','seller','broker','staff'], highlight: true },
-    ]
-  },
-  {
     label: 'BẢNG THEO DÕI',
     items: [
       { to: '/buyers', label: 'Khách Hàng', icon: BookUser, roles: ['admin','seller','broker','staff'] },
       { to: '/import-entry', label: 'Bảng Nhập', icon: PackagePlus, roles: ['admin','seller','broker','staff'] },
       { to: '/export-entry', label: 'Bảng Xuất', icon: PackageSearch, roles: ['admin','seller','broker','staff'] },
       { to: '/bwh-entry', label: 'Kho Ngoại Quan', icon: Container, roles: ['admin','seller','staff'] },
-    ]
-  },
-  {
-    label: 'KẾT QUẢ',
-    items: [
-      { to: '/trade-contracts', label: 'Hợp Đồng', icon: FileText, roles: ['admin','seller','broker','staff'] },
-      { to: '/trade-orders', label: 'Vận Chuyển / B/L', icon: Ship, roles: ['admin','seller','staff'] },
-      { to: '/quality', label: 'Kiểm Tra CL', icon: FlaskConical, roles: ['admin','seller','staff'] },
-      { to: '/settlement', label: 'Quyết Toán', icon: Scale, roles: ['admin','seller'] },
-      { to: '/trade-commissions', label: 'Hoa Hồng', icon: DollarSign, roles: ['admin','broker','seller'] },
     ]
   },
   {
