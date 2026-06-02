@@ -6,12 +6,10 @@ import api from '../lib/axios'
 
 const pageTitles = {
   '/dashboard': 'Dashboard',
-  '/entry': 'Nhập Liệu XNK',
-  '/trade-contracts': 'Hợp Đồng',
-  '/trade-orders': 'Vận Chuyển / Bill of Lading',
-  '/quality': 'Kiểm Tra Chất Lượng',
-  '/settlement': 'Quyết Toán',
-  '/trade-commissions': 'Hoa Hồng',
+  '/buyers': 'Khách Hàng (Buyers)',
+  '/import-entry': 'Bảng Nhập',
+  '/export-entry': 'Bảng Xuất',
+  '/bwh-entry': 'Kho Ngoại Quan (BWH)',
   '/history': 'Lịch Sử Hoạt Động',
   '/warehouse': 'Kho Ngoại Quan',
   '/files': 'Quản Lý File',

@@ -24,12 +24,15 @@ export default function Warehouse() {
     const params = {}
     if (search) params.search = search
     if (filterType) params.type = filterType
-    api.get('/warehouse', { params }).then(r => setEntries(r.data))
-    api.get('/warehouse/stock').then(r => setStock(r.data)).finally(() => setLoading(false))
+    Promise.all([
+      api.get('/warehouse', { params }),
+      api.get('/warehouse/stock'),
+    ]).then(([r1, r2]) => { setEntries(r1.data); setStock(r2.data) })
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [search, filterType])
-  useEffect(() => { api.get('/orders').then(r => setOrders(r.data)) }, [])
+  useEffect(() => { api.get('/orders').then(r => setOrders(r.data)).catch(() => {}) }, [])
 
   const save = async () => {
     setSaving(true)
