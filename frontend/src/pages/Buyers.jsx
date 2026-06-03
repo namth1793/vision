@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Search, Pencil, Trash2, X, Save, Users, Copy, Phone, Mail, Building2, CreditCard, ChevronDown } from 'lucide-react'
+import { Plus, Search, Pencil, Trash2, X, Save, Users, Copy, Phone, Mail, Building2, CreditCard, UserCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/axios'
 
 const EMPTY = {
   buyer_name: '',
+  seller_name: '',
   company_address: '',
   bank_details: '',
   email: '',
@@ -43,6 +44,12 @@ function BuyerCard({ buyer, onEdit, onDelete, onCopy }) {
       </div>
 
       <div className="space-y-2.5">
+        {buyer.seller_name && (
+          <div className="flex items-center gap-2">
+            <UserCheck size={13} className="text-slate-400 shrink-0" />
+            <p className="text-xs text-slate-600 font-medium">Seller: {buyer.seller_name}</p>
+          </div>
+        )}
         {buyer.company_address && (
           <div className="flex items-start gap-2">
             <Building2 size={13} className="text-slate-400 mt-0.5 shrink-0" />
@@ -114,6 +121,21 @@ function FormDrawer({ editId, form, setForm, onSave, onClose, saving }) {
               autoFocus
             />
             <p className="text-xs text-slate-400 mt-1">Tên ngắn gọn dùng để chọn trong các form xuất/nhập</p>
+          </div>
+
+          {/* SELLER NAME */}
+          <div>
+            <label className="label font-semibold text-slate-700 flex items-center gap-2">
+              <UserCheck size={14} className="text-slate-500" />
+              SELLER NAME
+            </label>
+            <input
+              className="input"
+              value={form.seller_name || ''}
+              onChange={fld('seller_name')}
+              placeholder="Tên seller / nhà cung cấp liên kết"
+            />
+            <p className="text-xs text-slate-400 mt-1">Seller thường giao dịch với buyer này</p>
           </div>
 
           {/* COMPANY NAME & ADDRESS */}

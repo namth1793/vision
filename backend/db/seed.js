@@ -3,7 +3,7 @@ const db = require('./database');
 
 console.log('🌱 Seeding Vision database...');
 
-// Clear tables in dependency order (trade_records first — references users)
+// Clear tables in dependency order
 db.exec(`
   DELETE FROM audit_logs;
   DELETE FROM trade_records;
@@ -18,6 +18,10 @@ db.exec(`
   DELETE FROM orders;
   DELETE FROM contracts;
   DELETE FROM files;
+  DELETE FROM export_records;
+  DELETE FROM import_records;
+  DELETE FROM bwh_records;
+  DELETE FROM buyers;
   DELETE FROM users;
   DELETE FROM sqlite_sequence;
 `);
@@ -137,6 +141,9 @@ inf.run(adminId,'Hoa hồng chờ duyệt','Lê Văn Bình có 2 khoản hoa h�
 inf.run(null,'Đơn hàng cập cảng','ORD-2024-005 đã cập cảng Đà Nẵng - 200 tấn gạo Jasmine','success','/orders');
 inf.run(seller2,'Chi phí chờ duyệt','Bạn có 2 khoản chi phí đang chờ duyệt','info','/expenses');
 inf.run(null,'Cảnh báo công nợ quá hạn','Công nợ từ Yokohama Rubber Co. đã quá hạn 15 ngày - 60,000 USD','error','/debts');
+
+// Seed dashboard tables (export_records, import_records, bwh_records, buyers + more expenses)
+require('./seed_dashboard');
 
 console.log('✅ Database seeded successfully!');
 console.log(`   Users: admin(${adminId}), seller1(${seller1}), seller2(${seller2}), broker(${brokerId}), staff(${staffId})`);

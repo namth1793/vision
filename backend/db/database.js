@@ -525,4 +525,9 @@ db.exec(`
   );
 `);
 
+// Add new columns safely (ignored if already exist)
+const addCol = (table, col, def) => { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`) } catch {} }
+addCol('expenses', 'bl_number', 'TEXT')
+addCol('buyers', 'seller_name', 'TEXT')
+
 module.exports = db;

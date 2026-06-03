@@ -7,7 +7,7 @@ import Modal from '../components/Modal'
 import { useAuth } from '../context/AuthContext'
 
 const fmt = n => n ? new Intl.NumberFormat('vi-VN').format(Math.round(n)) : '0'
-const EMPTY = { type: 'expense', category: 'travel', amount: '', currency: 'VND', date: new Date().toISOString().split('T')[0], description: '' }
+const EMPTY = { type: 'expense', category: 'other', amount: '', currency: 'VND', date: new Date().toISOString().split('T')[0], description: '', bl_number: '' }
 
 export default function Expenses() {
   const { hasRole } = useAuth()
@@ -19,6 +19,13 @@ export default function Expenses() {
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
+  const [importBLs, setImportBLs] = useState([])
+
+  useEffect(() => {
+    api.get('/import-records').then(r => {
+      setImportBLs(r.data.filter(x => x.bl_number).map(x => ({ bl: x.bl_number, contract: x.sale_contract })))
+    }).catch(() => {})
+  }, [])
 
   const load = () => {
     const params = {}
@@ -55,7 +62,7 @@ export default function Expenses() {
 
   const f = v => setForm(p => ({ ...p, ...v }))
 
-  const cats = [['travel', 'Công tác phí'], ['entertainment', 'Tiếp khách'], ['office', 'Văn phòng phẩm'], ['transport', 'Vận tải'], ['other', 'Khác']]
+  const cats = [['xe', 'Xe'], ['khach_san', 'Khách sạn'], ['an_trua', 'Ăn trưa'], ['other', 'Khác']]
   const catLabel = v => cats.find(c => c[0] === v)?.[1] || v
 
   const totals = { expense: data.filter(d => d.type === 'expense' && d.status !== 'rejected').reduce((s, d) => s + d.amount, 0), income: data.filter(d => d.type === 'income' && d.status !== 'rejected').reduce((s, d) => s + d.amount, 0) }
@@ -144,6 +151,15 @@ export default function Expenses() {
             </div>
           </div>
           <div><label className="label">Ngày *</label><input type="date" value={form.date} onChange={e => f({ date: e.target.value })} className="input" /></div>
+          <div>
+            <label className="label">Link B/L Number (Nhập)</label>
+            <select value={form.bl_number || ''} onChange={e => f({ bl_number: e.target.value })} className="select">
+              <option value="">— Không liên kết —</option>
+              {importBLs.map((b, i) => (
+                <option key={i} value={b.bl}>{b.bl}{b.contract ? ` — ${b.contract}` : ''}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </Modal>
     </div>

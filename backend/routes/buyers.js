@@ -28,23 +28,23 @@ router.get('/:id', authenticate, (req, res) => {
 
 router.post('/', authenticate, (req, res) => {
   try {
-    const { buyer_name, company_address, bank_details, email, phone, notes } = req.body;
+    const { buyer_name, company_address, bank_details, email, phone, notes, seller_name } = req.body;
     if (!buyer_name) return res.status(400).json({ error: 'Buyer name is required' });
     const result = db.prepare(`
-      INSERT INTO buyers (buyer_name, company_address, bank_details, email, phone, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(buyer_name, company_address||null, bank_details||null, email||null, phone||null, notes||null, req.user.id);
+      INSERT INTO buyers (buyer_name, company_address, bank_details, email, phone, notes, seller_name, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(buyer_name, company_address||null, bank_details||null, email||null, phone||null, notes||null, seller_name||null, req.user.id);
     res.status(201).json(db.prepare('SELECT * FROM buyers WHERE id=?').get(result.lastInsertRowid));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.put('/:id', authenticate, (req, res) => {
   try {
-    const { buyer_name, company_address, bank_details, email, phone, notes } = req.body;
+    const { buyer_name, company_address, bank_details, email, phone, notes, seller_name } = req.body;
     db.prepare(`
-      UPDATE buyers SET buyer_name=?, company_address=?, bank_details=?, email=?, phone=?, notes=?,
+      UPDATE buyers SET buyer_name=?, company_address=?, bank_details=?, email=?, phone=?, notes=?, seller_name=?,
       updated_at=datetime('now','localtime') WHERE id=?
-    `).run(buyer_name, company_address||null, bank_details||null, email||null, phone||null, notes||null, req.params.id);
+    `).run(buyer_name, company_address||null, bank_details||null, email||null, phone||null, notes||null, seller_name||null, req.params.id);
     res.json(db.prepare('SELECT * FROM buyers WHERE id=?').get(req.params.id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

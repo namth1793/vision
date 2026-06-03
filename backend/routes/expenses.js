@@ -22,21 +22,21 @@ router.get('/', authenticate, (req, res) => {
 
 router.post('/', authenticate, (req, res) => {
   try {
-    const { type, category, amount, currency, date, description } = req.body;
+    const { type, category, amount, currency, date, description, bl_number } = req.body;
     if (!type || !amount || !date || !description) return res.status(400).json({ error: 'Thiếu thông tin bắt buộc' });
-    const result = db.prepare('INSERT INTO expenses (type,category,amount,currency,date,description,submitted_by) VALUES (?,?,?,?,?,?,?)').run(type, category || 'other', amount, currency || 'VND', date, description, req.user.id);
+    const result = db.prepare('INSERT INTO expenses (type,category,amount,currency,date,description,bl_number,submitted_by) VALUES (?,?,?,?,?,?,?,?)').run(type, category || 'other', amount, currency || 'VND', date, description, bl_number||null, req.user.id);
     res.status(201).json(db.prepare(BASE + ' WHERE e.id=?').get(result.lastInsertRowid));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.put('/:id', authenticate, (req, res) => {
   try {
-    const { type, category, amount, currency, date, description, status } = req.body;
+    const { type, category, amount, currency, date, description, status, bl_number } = req.body;
     const expense = db.prepare('SELECT * FROM expenses WHERE id=?').get(req.params.id);
     if (!expense) return res.status(404).json({ error: 'Không tìm thấy' });
     if (status && status !== expense.status && req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ admin mới duyệt được' });
     const approvedBy = (status === 'approved' || status === 'paid') ? req.user.id : expense.approved_by;
-    db.prepare('UPDATE expenses SET type=?,category=?,amount=?,currency=?,date=?,description=?,status=?,approved_by=? WHERE id=?').run(type, category, amount, currency, date, description, status || expense.status, approvedBy, req.params.id);
+    db.prepare('UPDATE expenses SET type=?,category=?,amount=?,currency=?,date=?,description=?,bl_number=?,status=?,approved_by=? WHERE id=?').run(type, category, amount, currency, date, description, bl_number||null, status || expense.status, approvedBy, req.params.id);
     res.json(db.prepare(BASE + ' WHERE e.id=?').get(req.params.id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
