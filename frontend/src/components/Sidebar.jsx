@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Warehouse, FolderOpen, GitBranch, Receipt,
-  BarChart2, Users, Building2, X, History, PackageSearch, PackagePlus, Container, BookUser
+  BarChart2, Users, Building2, X, History, PackageSearch, PackagePlus,
+  Container, BookUser, TrendingUp, MapPin, Activity, Flag
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -13,19 +14,32 @@ const navGroups = [
     ]
   },
   {
+    label: 'DANH MỤC',
+    items: [
+      { to: '/buyers', label: 'Công Ty (Buyers)', icon: BookUser, roles: ['admin','seller','broker','staff'] },
+      { to: '/gpxk-turkey', label: 'GPXK Thổ', icon: Flag, roles: ['admin','seller','staff'] },
+    ]
+  },
+  {
     label: 'BẢNG THEO DÕI',
     items: [
-      { to: '/buyers', label: 'Khách Hàng', icon: BookUser, roles: ['admin','seller','broker','staff'] },
       { to: '/import-entry', label: 'Bảng Nhập', icon: PackagePlus, roles: ['admin','seller','broker','staff'] },
       { to: '/export-entry', label: 'Bảng Xuất', icon: PackageSearch, roles: ['admin','seller','broker','staff'] },
+      { to: '/export-progress', label: 'Tiến Độ Xuất', icon: Activity, roles: ['admin','seller','broker','staff'] },
       { to: '/bwh-entry', label: 'Kho Ngoại Quan', icon: Container, roles: ['admin','seller','staff'] },
+    ]
+  },
+  {
+    label: 'HÒA HỒNG',
+    items: [
+      { to: '/commission', label: 'Theo Dõi HH', icon: TrendingUp, roles: ['admin'] },
     ]
   },
   {
     label: 'QUẢN LÝ',
     items: [
       { to: '/history', label: 'Lịch Sử', icon: History, roles: ['admin','seller','broker','staff'] },
-      { to: '/warehouse', label: 'Kho Ngoại Quan', icon: Warehouse, roles: ['admin','seller','staff'] },
+      { to: '/warehouse', label: 'Kho', icon: Warehouse, roles: ['admin','seller','staff'] },
       { to: '/files', label: 'Quản Lý File', icon: FolderOpen, roles: ['admin','seller','staff'] },
       { to: '/pipeline', label: 'Pipeline', icon: GitBranch, roles: ['admin','seller'] },
       { to: '/expenses', label: 'Thu Chi Nội Bộ', icon: Receipt, roles: ['admin','seller','staff'] },
@@ -63,18 +77,14 @@ export default function Sidebar({ onClose }) {
             <div key={group.label}>
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-1.5">{group.label}</div>
               <div className="space-y-0.5">
-                {filtered.map(({ to, label, icon: Icon, highlight }) => (
+                {filtered.map(({ to, label, icon: Icon }) => (
                   <NavLink key={to} to={to} onClick={onClose}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors
-                      ${isActive
-                        ? highlight ? 'bg-blue-600 text-white' : 'bg-slate-700 text-white'
-                        : highlight ? 'text-blue-300 hover:bg-blue-600/20 hover:text-blue-200' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                      }`
+                      ${isActive ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`
                     }>
                     <Icon size={17} />
                     <span>{label}</span>
-                    {highlight && <span className="ml-auto text-[9px] bg-blue-500 text-white px-1.5 py-0.5 rounded-full font-bold">NHẬP</span>}
                   </NavLink>
                 ))}
               </div>

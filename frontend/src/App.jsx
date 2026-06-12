@@ -8,6 +8,7 @@ import History from './pages/History'
 import Buyers from './pages/Buyers'
 import ImportEntry from './pages/ImportEntry'
 import ExportEntry from './pages/ExportEntry'
+import ExportProgress from './pages/ExportProgress'
 import BwhEntry from './pages/BwhEntry'
 import Warehouse from './pages/Warehouse'
 import Files from './pages/Files'
@@ -15,6 +16,8 @@ import Pipeline from './pages/Pipeline'
 import Expenses from './pages/Expenses'
 import Reports from './pages/Reports'
 import Users from './pages/Users'
+import CommissionTracking from './pages/CommissionTracking'
+import GpxkTurkey from './pages/GpxkTurkey'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -31,12 +34,16 @@ function AppRoutes() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="history" element={<History />} />
-        {/* Buyers */}
+        {/* Master data */}
         <Route path="buyers" element={<Buyers />} />
-        {/* New XNK tables */}
+        <Route path="gpxk-turkey" element={<GpxkTurkey />} />
+        {/* XNK tables */}
         <Route path="import-entry" element={<ImportEntry />} />
         <Route path="export-entry" element={<ExportEntry />} />
+        <Route path="export-progress" element={<ExportProgress />} />
         <Route path="bwh-entry" element={<BwhEntry />} />
+        {/* Commission tracking (admin only) */}
+        <Route path="commission" element={<CommissionTracking />} />
         {/* Other modules */}
         <Route path="warehouse" element={<Warehouse />} />
         <Route path="files" element={<Files />} />

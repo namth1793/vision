@@ -53,6 +53,8 @@ app.use('/api/buyers', require('./routes/buyers'));
 app.use('/api/import-records', require('./routes/import_records'));
 app.use('/api/export-records', require('./routes/export_records'));
 app.use('/api/bwh-records', require('./routes/bwh_records'));
+app.use('/api/gpxk-turkey', require('./routes/gpxk_turkey'));
+app.use('/api/commission', require('./routes/commission_tracking'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 

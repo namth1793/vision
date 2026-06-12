@@ -2,7 +2,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+// On Railway, RAILWAY_ENVIRONMENT is set automatically — mount volume at /app/data
+const dataDir = process.env.DATA_DIR
+  || (process.env.RAILWAY_ENVIRONMENT ? '/app/data' : path.join(__dirname, '..', 'data'));
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, 'vision.db'));
@@ -525,9 +527,105 @@ db.exec(`
   );
 `);
 
+// ── NEW TABLES ──────────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS company_banks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    buyer_id INTEGER NOT NULL,
+    bank_name TEXT,
+    account_no TEXT,
+    swift_bic TEXT,
+    iban TEXT,
+    bank_branch TEXT,
+    bank_address TEXT,
+    currency TEXT DEFAULT 'USD',
+    notes TEXT,
+    is_primary INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS gpxk_turkey (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller TEXT NOT NULL,
+    cert_no TEXT,
+    expiry_date TEXT,
+    notes TEXT,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS commission_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT DEFAULT 'export',
+    sale_contract TEXT,
+    lot_number TEXT,
+    seller TEXT,
+    agency TEXT,
+    commodity TEXT,
+    qty_contract REAL,
+    qty_actual_nw REAL,
+    rate REAL,
+    rate_unit TEXT DEFAULT 'USD/MT',
+    est_amount REAL,
+    actual_amount REAL,
+    received_1 REAL,
+    date_1 TEXT,
+    received_2 REAL,
+    date_2 TEXT,
+    received_3 REAL,
+    date_3 TEXT,
+    note TEXT,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS commission_expense (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT DEFAULT 'export',
+    sale_contract TEXT,
+    lot_number TEXT,
+    vn_broker TEXT,
+    commodity TEXT,
+    qty_contract REAL,
+    qty_actual_bl REAL,
+    rate REAL,
+    rate_unit TEXT DEFAULT 'USD/MT',
+    est_amount REAL,
+    actual_amount REAL,
+    paid_1 REAL,
+    date_1 TEXT,
+    paid_2 REAL,
+    date_2 TEXT,
+    paid_3 REAL,
+    date_3 TEXT,
+    note TEXT,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+`);
+
 // Add new columns safely (ignored if already exist)
 const addCol = (table, col, def) => { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`) } catch {} }
 addCol('expenses', 'bl_number', 'TEXT')
+addCol('expenses', 'supervisor_name', 'TEXT')
+addCol('expenses', 'company_warehouse', 'TEXT')
+addCol('expenses', 'province_city', 'TEXT')
 addCol('buyers', 'seller_name', 'TEXT')
+addCol('buyers', 'company_vi', 'TEXT')
+addCol('buyers', 'tax_code', 'TEXT')
+addCol('export_records', 'cont_type', "TEXT DEFAULT '20'")
+addCol('export_records', 'price_unit', "TEXT DEFAULT 'USD/LB'")
+addCol('export_records', 'dhl_pay_to', 'TEXT')
+addCol('export_records', 'dhl_payment_date', 'TEXT')
+addCol('import_records', 'bl_seq', 'INTEGER DEFAULT 1')
+addCol('import_records', 'bl_number_2', 'TEXT')
+addCol('import_records', 'bl_number_3', 'TEXT')
 
 module.exports = db;
