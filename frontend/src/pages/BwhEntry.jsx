@@ -309,7 +309,7 @@ export default function BwhEntry() {
                   <CalcField label="[6] % = Diff / GW_BL × 100" value={fmtPct(c.pctDiffIn)} color={c.pctDiffIn < 0 ? 'red' : 'amber'} small />
                 </div>
                 <div className="mt-4">
-                  <Inp label="NOTE (v/v thiếu hụt khi nhập kho & lấy xác nhận nhập kho)">
+                  <Inp label="NOTE (V/V THIẾU HỤT KHI NHẬP KHO & LẤY XÁC NHẬN NHẬP KHO)">
                     <textarea className="input" rows={2} value={form.note_into_bwh} onChange={fld('note_into_bwh')} />
                   </Inp>
                 </div>
@@ -331,7 +331,7 @@ export default function BwhEntry() {
                   <CalcField label="[13] % = Diff / GW_In × 100" value={fmtPct(c.pctDiffOut)} color={c.pctDiffOut < 0 ? 'red' : 'amber'} small />
                 </div>
                 <div className="mt-4">
-                  <Inp label="NOTE (v/v thiếu hụt khi xuất kho & lấy xác nhận xuất kho)">
+                  <Inp label="NOTE (V/V THIẾU HỤT KHI XUẤT KHO & LẤY XÁC NHẬN XUẤT KHO)">
                     <textarea className="input" rows={2} value={form.note_out_bwh} onChange={fld('note_out_bwh')} />
                   </Inp>
                 </div>
@@ -356,20 +356,20 @@ export default function BwhEntry() {
                   <Inp label="INS Fee ($)"><input type="number" step="0.01" className="input" value={form.ins_fee} onChange={fld('ins_fee')} /></Inp>
                   <Inp label="% Insured"><input type="number" step="0.01" className="input" value={form.pct_insured} onChange={fld('pct_insured')} placeholder="100" /></Inp>
                   <div className="flex items-end">
-                    <CalcField label="[4] Cargo Value = NW × Price × %Ins" value={fmtUSD(c.cargoValueInsured)} color="teal" small />
+                    <CalcField label="Cargo Value Insured = Net Weight × Price × % Insured" value={fmtUSD(c.cargoValueInsured)} color="teal" small />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                   <Inp label="Rate (%)"><input type="number" step="0.0001" className="input" value={form.ins_rate} onChange={fld('ins_rate')} placeholder="0.00" /></Inp>
                   <Inp label="VAT (%)"><input type="number" step="0.01" className="input" value={form.ins_vat} onChange={fld('ins_vat')} placeholder="0.00" /></Inp>
                   <div className="flex items-end">
-                    <CalcField label="[7] Checking INS FEE = CVI×Rate×(1+VAT)" value={fmtUSD(c.checkingInsFee)} color="teal" small />
+                    <CalcField label="Checking INS FEE = Cargo Value × Rate + (Cargo Value × Rate) × VAT" value={fmtUSD(c.checkingInsFee)} color="teal" small />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                   <Inp label="Exchange Rate (VND)"><input type="number" step="1" className="input" value={form.exchange_rate} onChange={fld('exchange_rate')} placeholder="25000" /></Inp>
                   <div className="flex items-end">
-                    <CalcField label="[9] In VND = Checking × Exchange Rate" value={fmtVND(c.insInVnd)} color="teal" small />
+                    <CalcField label="In VND = Checking INS FEE × Exchange Rate" value={fmtVND(c.insInVnd)} color="teal" small />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">

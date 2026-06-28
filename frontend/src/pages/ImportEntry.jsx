@@ -17,7 +17,7 @@ function compute(f) {
   const nutPen = n(f.nutcount_penalty), moistPen = n(f.moisture_penalty)
   const totalBags = n(f.total_bags), gwBl = n(f.gw_bl)
   const lessAdv = n(f.less_advance), disc1 = n(f.discount1)
-  const secPay = n(f.second_payment), finalSett = n(f.final_settlement)
+  const secPay = n(f.second_payment)
   const nwBw = n(f.nw_bw)
   const outVina = n(f.outturn_vina), nutVina = n(f.nutcount_vina), moistVina = n(f.moisture_vina)
   const demDet = n(f.dem_det), sto = n(f.sto), fee1 = n(f.other_fee1), fee2 = n(f.other_fee2)
@@ -27,18 +27,22 @@ function compute(f) {
   const contractValue = price * qty
   const penalty_1to2 = p1to1 * 2
   const nwBl = gwBl - totalBags / 1000
-  const lessRetention = -(price * nwBl * pct3 / 100)
+  const cargoValue = nwBl * price
+  const lessRetention = -(cargoValue * pct3 / 100)
   const calcBlInvoice = price * nwBl + lessAdv + lessRetention + disc1
 
   const shortageOvertage = nwBw - nwBl
   const diffOutturn = outVina - outturn
 
-  let outurnClaim = 0
-  const threshold = outturn + dp
-  if (outVina < threshold) {
-    outurnClaim = (outturn - threshold) * p1to1 * nwBw + (threshold - outVina) * penalty_1to2 * nwBw
-  } else if (outVina < outturn) {
-    outurnClaim = (outturn - outVina) * p1to1 * nwBw
+  const threshold = outturn + dp // dp entered as negative offset
+  let outurnClaim1to1 = 0, outurnClaim1to2 = 0
+  if (outVina < outturn) {
+    if (outVina >= threshold) {
+      outurnClaim1to1 = (outturn - outVina) * p1to1 * nwBw
+    } else {
+      outurnClaim1to1 = (outturn - threshold) * p1to1 * nwBw
+      outurnClaim1to2 = (threshold - outVina) * penalty_1to2 * nwBw
+    }
   }
 
   const nutDiff = nutVina - nutcount
@@ -48,7 +52,8 @@ function compute(f) {
 
   const calcDebitCredit = Math.round((
     price * nwBw - secPay + lessAdv
-    - outurnClaim - nutcountClaim - moistureClaim
+    - outurnClaim1to1 - outurnClaim1to2
+    - nutcountClaim - moistureClaim
     - demDet - sto - fee1 - fee2
   ) * 100) / 100
 
@@ -65,8 +70,8 @@ function compute(f) {
   const comm2Amount = c2 * nwBw
 
   return {
-    contractValue, penalty_1to2, nwBl, lessRetention, calcBlInvoice,
-    shortageOvertage, diffOutturn, outurnClaim, nutDiff, moistDiff,
+    contractValue, penalty_1to2, nwBl, cargoValue, lessRetention, calcBlInvoice,
+    shortageOvertage, diffOutturn, outurnClaim1to1, outurnClaim1to2, nutDiff, moistDiff,
     nutcountClaim, moistureClaim, calcDebitCredit, notesDebitCredit,
     statusSettlement, comm1Amount, comm2Amount
   }
@@ -78,12 +83,12 @@ const EMPTY = {
   shipment: '', quantity: '', origin: '', pol: '',
   outturn: '', nutcount: '', moisture: '', price: '',
   pct1: '', pct2: '', pct3: '', double_penalty: '', penalty_1to1: '', nutcount_penalty: '', moisture_penalty: '',
-  advanced_payment: '', payment_date1: '', second_payment: '', payment_date2: '', final_settlement: '', payment_date3: '',
-  line_loader: '', bl_number: '', eta_caimep: '', eta_hcm: '', eta_pod: '', notes_bill: '',
+  advanced_payment: '', payment_date1: '', second_payment: '', payment_date2: '', final_settlement: '', payment_date3: '', note_pay: '',
+  shipping_line: '', loader: '', bl_number: '', eta_caimep: '', eta_hcm: '', eta_pod: '', notes_bill: '',
   dhl_fedex_number: '', dhl_delivered: '', total_cont: '', cont_size: '', total_bags: '', gw_bl: '',
   less_advance: '', discount1: '',
   seller_invoice_amount: '', notes_invoice: '',
-  date_unload: '', notes_cert: '', certificate_no: '', date_certificate: '', nw_bw: '',
+  date_unload: '', supervisor: '', notes_cert: '', certificate_no: '', date_certificate: '', nw_bw: '',
   outturn_vina: '', nutcount_vina: '', moisture_vina: '',
   dem_det: '', sto: '', other_fee1: '', other_fee2: '',
   debit_credit_input: '', notes_final: '',
@@ -246,7 +251,8 @@ export default function ImportEntry() {
             <Row label="Payment Date 3" value={viewRecord.payment_date3} />
           </Sec>
           <Sec title="③ Vận Chuyển / B/L" color="border-violet-500">
-            <Row label="Line/Loader" value={viewRecord.line_loader} />
+            <Row label="Shipping Line" value={viewRecord.shipping_line} />
+            <Row label="Loader" value={viewRecord.loader} />
             <Row label="B/L Number" value={viewRecord.bl_number} />
             <Row label="ETA CAIMEP" value={viewRecord.eta_caimep} />
             <Row label="ETA HCM" value={viewRecord.eta_hcm} />
@@ -259,10 +265,11 @@ export default function ImportEntry() {
             <Row label="Total Bags" value={viewRecord.total_bags} />
             <Row label="GW on B/L (MT)" value={viewRecord.gw_bl} />
             <Row label="✦ NW on B/L (MT)" value={fmtNum(vc.nwBl)} isCalc />
+            <Row label="✦ Cargo Value = NW × Price" value={fmtUSD(vc.cargoValue)} isCalc />
             <Row label="Less Advance (-)" value={viewRecord.less_advance} />
             <Row label="✦ Less Retention (-)" value={fmtUSD(vc.lessRetention)} isCalc />
             <Row label="Discount (-)" value={viewRecord.discount1} />
-            <Row label="✦ Calc B/L Invoice" value={fmtUSD(vc.calcBlInvoice)} isCalc />
+            <Row label="✦ Amount Payable to Seller" value={fmtUSD(vc.calcBlInvoice)} isCalc />
             <Row label="Seller Invoice Amount ($)" value={fmtUSD(viewRecord.seller_invoice_amount)} />
             <Row label="Notes Invoice" value={viewRecord.notes_invoice} />
           </Sec>
@@ -277,7 +284,8 @@ export default function ImportEntry() {
             <Row label="Nutcount Vina/CF" value={viewRecord.nutcount_vina} />
             <Row label="Moisture Vina/CF" value={viewRecord.moisture_vina} />
             <Row label="✦ Diff Outturn" value={fmtNum(vc.diffOutturn)} isCalc />
-            <Row label="✦ Outturn Claim ($)" value={fmtUSD(vc.outurnClaim)} isCalc />
+            <Row label="✦ 1:1 Outturn Claim ($)" value={fmtUSD(vc.outurnClaim1to1)} isCalc />
+            <Row label="✦ 1:2 Outturn Claim ($)" value={fmtUSD(vc.outurnClaim1to2)} isCalc />
             <Row label="✦ Nutcount Diff" value={fmtNum(vc.nutDiff)} isCalc />
             <Row label="✦ Nutcount Claim ($)" value={fmtUSD(vc.nutcountClaim)} isCalc />
             <Row label="✦ Moisture Diff" value={fmtNum(vc.moistDiff)} isCalc />
@@ -352,7 +360,9 @@ export default function ImportEntry() {
                 <Inp label="Buyer (bên mua)"><input className="input" value={form.buyer} onChange={fld('buyer')} /></Inp>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Inp label="Shipment"><input className="input" value={form.shipment} onChange={fld('shipment')} /></Inp>
+                <Inp label="Shipment (ngày giao hàng)">
+                  <input type="date" className="input" value={form.shipment} onChange={fld('shipment')} />
+                </Inp>
                 <Inp label="Quantity (MT)"><input type="number" step="0.001" className="input" value={form.quantity} onChange={fld('quantity')} placeholder="0.000" /></Inp>
                 <Inp label="Origin"><input className="input" value={form.origin} onChange={fld('origin')} /></Inp>
                 <Inp label="POL"><input className="input" value={form.pol} onChange={fld('pol')} /></Inp>
@@ -391,8 +401,8 @@ export default function ImportEntry() {
             <div className="space-y-5">
               <h2 className="font-bold text-emerald-700 border-b border-emerald-100 pb-2">② Thanh Toán</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Advanced Payment Paid ($)"><input type="number" step="0.01" className="input" value={form.advanced_payment} onChange={fld('advanced_payment')} placeholder="0.00" /></Inp>
-                <Inp label="Payment Date 1"><input type="date" className="input" value={form.payment_date1} onChange={fld('payment_date1')} /></Inp>
+                <Inp label="Prepayment / 1st Payment ($)"><input type="number" step="0.01" className="input" value={form.advanced_payment} onChange={fld('advanced_payment')} placeholder="0.00" /></Inp>
+                <Inp label="Payment Date"><input type="date" className="input" value={form.payment_date1} onChange={fld('payment_date1')} /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Inp label="Second Payment ($)"><input type="number" step="0.01" className="input" value={form.second_payment} onChange={fld('second_payment')} placeholder="0.00" /></Inp>
@@ -402,6 +412,7 @@ export default function ImportEntry() {
                 <Inp label="Final Settlement ($)"><input type="number" step="0.01" className="input" value={form.final_settlement} onChange={fld('final_settlement')} placeholder="0.00" /></Inp>
                 <Inp label="Payment Date 3"><input type="date" className="input" value={form.payment_date3} onChange={fld('payment_date3')} /></Inp>
               </div>
+              <Inp label="NOTE PAY"><input className="input" value={form.note_pay || ''} onChange={fld('note_pay')} /></Inp>
               <div className="flex justify-end pt-2">
                 <button onClick={() => setActiveTab('shipment')} className="btn-secondary">Tiếp: Vận Chuyển <ChevronRight size={15}/></button>
               </div>
@@ -412,14 +423,15 @@ export default function ImportEntry() {
           {activeTab === 'shipment' && (
             <div className="space-y-5">
               <h2 className="font-bold text-violet-700 border-b border-violet-100 pb-2">③ Vận Chuyển / Bill of Lading</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Line/Loader"><input className="input" value={form.line_loader} onChange={fld('line_loader')} /></Inp>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Inp label="Shipping Line"><input className="input" value={form.shipping_line || ''} onChange={fld('shipping_line')} /></Inp>
+                <Inp label="Loader"><input className="input" value={form.loader || ''} onChange={fld('loader')} /></Inp>
                 <Inp label="B/L Number"><input className="input" value={form.bl_number} onChange={fld('bl_number')} /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Inp label="ETA CAIMEP"><input type="date" className="input" value={form.eta_caimep} onChange={fld('eta_caimep')} /></Inp>
                 <Inp label="ETA HCM"><input type="date" className="input" value={form.eta_hcm} onChange={fld('eta_hcm')} /></Inp>
-                <Inp label="ETA POD"><input className="input" value={form.eta_pod} onChange={fld('eta_pod')} placeholder="Ngày thực tế" /></Inp>
+                <Inp label="ETA FPOD (ngày thực tế)"><input className="input" value={form.eta_pod} onChange={fld('eta_pod')} placeholder="Nhập ngày thực tế" /></Inp>
               </div>
               <Inp label="Notes Bill"><textarea className="input" rows={2} value={form.notes_bill} onChange={fld('notes_bill')} /></Inp>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -432,22 +444,25 @@ export default function ImportEntry() {
                 <Inp label="Total Bags"><input type="number" step="1" className="input" value={form.total_bags} onChange={fld('total_bags')} /></Inp>
                 <Inp label="GW on B/L (MT)"><input type="number" step="0.001" className="input" value={form.gw_bl} onChange={fld('gw_bl')} /></Inp>
                 <div className="flex items-end">
-                  <CalcField label="[13] NW on B/L = GW − Bags/1000" value={`${fmtNum(c.nwBl)} MT`} color="violet" small />
+                  <CalcField label="NW on B/L = GW − Bags/1000 (MT)" value={`${fmtNum(c.nwBl)} MT`} color="violet" small />
                 </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <Inp label="Less Advance (-) ($)"><input type="number" step="0.01" className="input" value={form.less_advance} onChange={fld('less_advance')} placeholder="0.00 (nhập số âm)" /></Inp>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-violet-50 p-3 rounded-lg">
+                <CalcField label="Cargo Value = NW on B/L × Price" value={fmtUSD(c.cargoValue)} color="violet" />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Inp label="Less Advance (-) ($)"><input type="number" step="0.01" className="input" value={form.less_advance} onChange={fld('less_advance')} placeholder="0.00 (số âm)" /></Inp>
                 <div className="flex items-end">
-                  <CalcField label="[15] Less Retention = −Price × NW_BL × 3rd%" value={fmtUSD(c.lessRetention)} color="violet" small />
+                  <CalcField label="Less Retention (-) = −Cargo Value × 3rd%" value={fmtUSD(c.lessRetention)} color="violet" small />
                 </div>
-                <Inp label="Discount (-) ($)"><input type="number" step="0.01" className="input" value={form.discount1} onChange={fld('discount1')} placeholder="0.00 (nhập số âm)" /></Inp>
+                <Inp label="Discount (-) ($)"><input type="number" step="0.01" className="input" value={form.discount1} onChange={fld('discount1')} placeholder="0.00 (số âm)" /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-violet-50 p-3 rounded-lg">
-                <CalcField label="[17] Calc B/L Invoice = Price×NW_BL + Less Adv + Less Ret + Discount" value={fmtUSD(c.calcBlInvoice)} color="violet" />
+                <CalcField label="Amount Payable to Seller = Price × NW on B/L + Less Advance + Less Retention + Discount" value={fmtUSD(c.calcBlInvoice)} color="violet" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Inp label="Seller Invoice Amount ($)"><input type="number" step="0.01" className="input" value={form.seller_invoice_amount} onChange={fld('seller_invoice_amount')} /></Inp>
-                <Inp label="Notes Invoice"><input className="input" value={form.notes_invoice} onChange={fld('notes_invoice')} /></Inp>
+                <Inp label="NOTES INVOICE"><input className="input" value={form.notes_invoice} onChange={fld('notes_invoice')} /></Inp>
               </div>
               <div className="flex justify-end pt-2">
                 <button onClick={() => setActiveTab('quality')} className="btn-secondary">Tiếp: Kiểm Tra CL <ChevronRight size={15}/></button>
@@ -459,12 +474,13 @@ export default function ImportEntry() {
           {activeTab === 'quality' && (
             <div className="space-y-5">
               <h2 className="font-bold text-amber-700 border-b border-amber-100 pb-2">④ Kiểm Tra Chất Lượng</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Inp label="Date Unload Cargo"><input type="date" className="input" value={form.date_unload} onChange={fld('date_unload')} /></Inp>
+                <Inp label="Supervisor"><input className="input" value={form.supervisor || ''} onChange={fld('supervisor')} /></Inp>
                 <Inp label="Notes CERT"><input className="input" value={form.notes_cert} onChange={fld('notes_cert')} /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Certificate No (Vina/CF)"><input className="input" value={form.certificate_no} onChange={fld('certificate_no')} /></Inp>
+                <Inp label="Vina/Cafecontrol Certificate No"><input className="input" value={form.certificate_no} onChange={fld('certificate_no')} /></Inp>
                 <Inp label="Date of Certificate"><input type="date" className="input" value={form.date_certificate} onChange={fld('date_certificate')} /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -481,14 +497,17 @@ export default function ImportEntry() {
                 <Inp label="Moisture Vina/CF"><input type="number" step="0.01" className="input" value={form.moisture_vina} onChange={fld('moisture_vina')} /></Inp>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-                <CalcField label="Diff Outturn = Vina − Contract" value={fmtNum(c.diffOutturn)} color={c.diffOutturn > 0 ? 'amber' : 'green'} note="Vina − Outturn" />
-                <CalcField label="[2] Outturn Claim ($)" value={fmtUSD(c.outurnClaim)} color="amber" note="Theo công thức 1:1 / 1:2" />
-                <CalcField label="Nutcount Diff" value={fmtNum(c.nutDiff)} color={c.nutDiff > 0 ? 'amber' : 'green'} />
+                <CalcField label="Difference Outturn = Outturn Vina − Contract" value={fmtNum(c.diffOutturn)} color={c.diffOutturn < 0 ? 'amber' : 'green'} />
+                <CalcField label="1:1 Outturn Claim ($)" value={fmtUSD(c.outurnClaim1to1)} color="amber" note="NW_Vina × (Outturn − threshold) × 1:1 Penalty" />
+                <CalcField label="1:2 Outturn Claim ($)" value={fmtUSD(c.outurnClaim1to2)} color="red" note="NW_Vina × (threshold − Outturn_Vina) × 1:2 Penalty" />
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <CalcField label="[3] Nutcount Claim ($)" value={fmtUSD(c.nutcountClaim)} color="amber" note="Nếu Nut_Vina > Nutcount" />
-                <CalcField label="Moisture Diff" value={fmtNum(c.moistDiff)} color={c.moistDiff > 0 ? 'amber' : 'green'} />
-                <CalcField label="[4] Moisture Claim ($)" value={fmtUSD(c.moistureClaim)} color="amber" note="Nếu Moist_Vina > Moisture" />
+                <CalcField label="Difference Nut = Nutcount Vina − Contract" value={fmtNum(c.nutDiff)} color={c.nutDiff > 0 ? 'amber' : 'green'} />
+                <CalcField label="Nutcount Claim ($)" value={fmtUSD(c.nutcountClaim)} color="amber" note="Nếu Diff Nut > 0" />
+                <CalcField label="Difference Moisture" value={fmtNum(c.moistDiff)} color={c.moistDiff > 0 ? 'amber' : 'green'} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <CalcField label="Moisture Claim ($)" value={fmtUSD(c.moistureClaim)} color="amber" note="Nếu Diff Moisture > 0" />
               </div>
               <div className="flex justify-end pt-2">
                 <button onClick={() => setActiveTab('settlement')} className="btn-secondary">Tiếp: Quyết Toán <ChevronRight size={15}/></button>
@@ -507,8 +526,8 @@ export default function ImportEntry() {
                 <Inp label="Other Fee 2 ($)"><input type="number" step="0.01" className="input" value={form.other_fee2} onChange={fld('other_fee2')} placeholder="0.00" /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-red-50 p-3 rounded-lg">
-                <CalcField label="[9] Calculate Debit/Credit" value={fmtUSD(c.calcDebitCredit)} color={c.calcDebitCredit >= 0 ? 'green' : 'red'}
-                  note="= Price×NW_Vina − 2nd_Pay + Less_Adv − Claims − Fees" />
+                <CalcField label="Calculate Debit/Credit" value={fmtUSD(c.calcDebitCredit)} color={c.calcDebitCredit >= 0 ? 'green' : 'red'}
+                  note="= Price×NW_Vina − 2nd Payment + Less Advance − 1:1 Claim − 1:2 Claim − Nutcount − Moisture − DEM/DET − STO − Fees" />
                 <div className={`rounded-lg border-2 p-3 ${c.notesDebitCredit.includes('Buyer') && !c.notesDebitCredit.includes('Seller has') ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
                   <div className="text-xs text-slate-500 mb-1 flex items-center gap-1"><Calculator size={12}/> [10] Notes — Bên thanh toán</div>
                   <div className="text-sm font-bold text-slate-800 italic">"{c.notesDebitCredit}"</div>
