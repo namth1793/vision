@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/axios'
+import ExcelImportExport from '../components/ExcelImportExport'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const n = (v) => parseFloat(v) || 0
@@ -175,17 +176,20 @@ export default function Entry() {
     setViewRecord(res.data)
   }
 
-  const save = async () => {
-    if (!form.contract_no) { toast.error('Vui lòng nhập số hợp đồng'); setActiveTab('contract'); return }
+  const save = async (opts = {}) => {
+    if (!form.contract_no) { toast.error('Vui lòng nhập số hợp đồng'); setActiveTab('contract'); return false }
     setSaving(true)
     try {
-      if (editId) await api.put(`/trades/${editId}`, form)
-      else await api.post('/trades', form)
-      toast.success(editId ? 'Đã cập nhật bản ghi' : 'Đã tạo bản ghi mới')
-      setShowForm(false); load()
-    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu dữ liệu') }
+      const res = editId ? await api.put(`/trades/${editId}`, form) : await api.post('/trades', form)
+      if (!editId && res.data?.id) setEditId(res.data.id)
+      if (opts.close === false) toast.success('Đã lưu', { duration: 1200 })
+      else { toast.success(editId ? 'Đã cập nhật bản ghi' : 'Đã tạo bản ghi mới'); setShowForm(false); load() }
+      return true
+    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu dữ liệu'); return false }
     finally { setSaving(false) }
   }
+
+  const goNext = async (tab) => { if (await save({ close: false })) setActiveTab(tab) }
 
   const remove = async (id) => {
     if (!confirm('Xóa bản ghi này?')) return
@@ -379,7 +383,7 @@ export default function Entry() {
               </div>
               {/* Navigation */}
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('payment')} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={16}/></button>
+                <button onClick={() => goNext('payment')} disabled={saving} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={16}/></button>
               </div>
             </div>
           )}
@@ -399,7 +403,7 @@ export default function Entry() {
                 <CalcField label="Remaining (ước tính)" value={fmtUSD(calc.contractValue - n(form.advanced_payment) - n(form.second_payment))} color={calc.contractValue - n(form.advanced_payment) - n(form.second_payment) > 0 ? 'amber' : 'green'} />
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('shipment')} className="btn-secondary">Tiếp: Vận Chuyển <ChevronRight size={16}/></button>
+                <button onClick={() => goNext('shipment')} disabled={saving} className="btn-secondary">Tiếp: Vận Chuyển <ChevronRight size={16}/></button>
               </div>
             </div>
           )}
@@ -442,7 +446,7 @@ export default function Entry() {
                 />
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('quality')} className="btn-secondary">Tiếp: Kiểm Tra CL <ChevronRight size={16}/></button>
+                <button onClick={() => goNext('quality')} disabled={saving} className="btn-secondary">Tiếp: Kiểm Tra CL <ChevronRight size={16}/></button>
               </div>
             </div>
           )}
@@ -491,7 +495,7 @@ export default function Entry() {
                 </div>
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('settlement')} className="btn-secondary">Tiếp: Quyết Toán <ChevronRight size={16}/></button>
+                <button onClick={() => goNext('settlement')} disabled={saving} className="btn-secondary">Tiếp: Quyết Toán <ChevronRight size={16}/></button>
               </div>
             </div>
           )}
@@ -535,7 +539,7 @@ export default function Entry() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('commission')} className="btn-secondary">Tiếp: Hoa Hồng <ChevronRight size={16}/></button>
+                <button onClick={() => goNext('commission')} disabled={saving} className="btn-secondary">Tiếp: Hoa Hồng <ChevronRight size={16}/></button>
               </div>
             </div>
           )}
@@ -595,6 +599,7 @@ export default function Entry() {
             <option value="completed">Hoàn thành</option>
             <option value="cancelled">Đã hủy</option>
           </select>
+          <ExcelImportExport resource="trades" filename="mau_nhap_lieu_trades" onImported={load} />
           <button onClick={openCreate} className="btn-primary"><Plus size={16}/> Nhập liệu mới</button>
         </div>
       </div>

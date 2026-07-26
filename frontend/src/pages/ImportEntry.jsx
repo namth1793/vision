@@ -1,23 +1,33 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight } from 'lucide-react'
+import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight, PlusCircle, Trash } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/axios'
+import ExcelImportExport from '../components/ExcelImportExport'
+import StaffBonusTable, { EMPTY_BONUS } from '../components/StaffBonusTable'
 
 const n = (v) => parseFloat(v) || 0
 const fmtUSD = (v) => (v == null || isNaN(v)) ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtNum = (v, d = 3) => (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
 const fmtPct = (v) => (v == null || isNaN(v)) ? '—' : `${Number(v).toFixed(4)}%`
 
+// ── Per-BL calculations — a contract can ship across multiple BLs ────────────
+function computeBl(bl, price, pct3) {
+  const totalBags = n(bl.total_bags), gwBl = n(bl.gw_bl)
+  const nwBlAuto = gwBl - totalBags / 1000
+  const nwBl = n(bl.nw_bl) || nwBlAuto // manual entry overrides the GW-Bags/1000 formula
+  const cargoValue = nwBl * price
+  const lessRetention = -(cargoValue * pct3 / 100)
+  const lessAdv = n(bl.less_advance), disc1 = n(bl.discount1), otherFee = n(bl.bl_other_fee)
+  const calcBlInvoice = price * nwBl + lessAdv + lessRetention + disc1 + otherFee
+  return { nwBl, nwBlAuto, cargoValue, lessRetention, calcBlInvoice }
+}
+
 function compute(f) {
   const price = n(f.price), qty = n(f.quantity)
   const pct3 = n(f.pct3)
-  const p1to1 = n(f.penalty_1to1)
   const outturn = n(f.outturn), nutcount = n(f.nutcount), moisture = n(f.moisture)
-  const dp = n(f.double_penalty)
+  const dp = n(f.double_penalty) // entered as a positive "points below" threshold
   const nutPen = n(f.nutcount_penalty), moistPen = n(f.moisture_penalty)
-  const totalBags = n(f.total_bags), gwBl = n(f.gw_bl)
-  const lessAdv = n(f.less_advance), disc1 = n(f.discount1)
-  const secPay = n(f.second_payment)
   const nwBw = n(f.nw_bw)
   const outVina = n(f.outturn_vina), nutVina = n(f.nutcount_vina), moistVina = n(f.moisture_vina)
   const demDet = n(f.dem_det), sto = n(f.sto), fee1 = n(f.other_fee1), fee2 = n(f.other_fee2)
@@ -25,16 +35,24 @@ function compute(f) {
   const dcInput = n(f.debit_credit_input)
 
   const contractValue = price * qty
-  const penalty_1to2 = p1to1 * 2
-  const nwBl = gwBl - totalBags / 1000
-  const cargoValue = nwBl * price
-  const lessRetention = -(cargoValue * pct3 / 100)
-  const calcBlInvoice = price * nwBl + lessAdv + lessRetention + disc1
 
-  const shortageOvertage = nwBw - nwBl
+  // 1:1 Penalty auto = Price / Outturn — manual entry overrides
+  const p1to1Auto = outturn > 0 ? price / outturn : 0
+  const p1to1 = n(f.penalty_1to1) || p1to1Auto
+  // 1:2 Penalty auto = 1:1 × 2 — manual entry overrides
+  const p1to2Auto = p1to1 * 2
+  const penalty_1to2 = n(f.penalty_1to2) || p1to2Auto
+
+  const bls = f.bls || []
+  const nwBlTotal = bls.reduce((s, bl) => s + computeBl(bl, price, pct3).nwBl, 0)
+  const secPayTotal = bls.reduce((s, bl) => s + n(bl.second_payment), 0)
+  const lessAdvTotal = bls.reduce((s, bl) => s + n(bl.less_advance), 0)
+  const finalSettlementTotal = bls.reduce((s, bl) => s + n(bl.final_settlement), 0)
+
+  const shortageOvertage = nwBw - nwBlTotal
   const diffOutturn = outVina - outturn
 
-  const threshold = outturn + dp // dp entered as negative offset
+  const threshold = outturn - dp
   let outurnClaim1to1 = 0, outurnClaim1to2 = 0
   if (outVina < outturn) {
     if (outVina >= threshold) {
@@ -51,7 +69,7 @@ function compute(f) {
   const moistureClaim = moistDiff > 0 ? moistDiff * moistPen * nwBw : 0
 
   const calcDebitCredit = Math.round((
-    price * nwBw - secPay + lessAdv
+    price * nwBw - secPayTotal + lessAdvTotal
     - outurnClaim1to1 - outurnClaim1to2
     - nutcountClaim - moistureClaim
     - demDet - sto - fee1 - fee2
@@ -62,7 +80,7 @@ function compute(f) {
     : `${f.seller || 'Seller'} has to pay ${f.buyer || 'Buyer'}`
 
   let statusSettlement = 'NOT YET'
-  if (n(f.final_settlement) !== 0 && Math.abs(dcInput - n(f.final_settlement)) < 0.01) {
+  if (finalSettlementTotal !== 0 && Math.abs(dcInput - finalSettlementTotal) < 0.01) {
     statusSettlement = 'CLOSED'
   }
 
@@ -70,11 +88,20 @@ function compute(f) {
   const comm2Amount = c2 * nwBw
 
   return {
-    contractValue, penalty_1to2, nwBl, cargoValue, lessRetention, calcBlInvoice,
+    contractValue, p1to1, p1to1Auto, penalty_1to2, p1to2Auto,
+    nwBlTotal, secPayTotal, lessAdvTotal, finalSettlementTotal,
     shortageOvertage, diffOutturn, outurnClaim1to1, outurnClaim1to2, nutDiff, moistDiff,
     nutcountClaim, moistureClaim, calcDebitCredit, notesDebitCredit,
     statusSettlement, comm1Amount, comm2Amount
   }
+}
+
+const EMPTY_BL = {
+  shipping_line: '', loader: '', bl_number: '', eta_caimep: '', eta_hcm: '', eta_pod: '', notes_bill: '',
+  dhl_fedex_number: '', dhl_delivered: '', total_cont: '', cont_size: '', total_bags: '', gw_bl: '', nw_bl: '',
+  less_advance: '', discount1: '', bl_other_fee: '',
+  seller_invoice_amount: '', notes_invoice: '',
+  second_payment: '', payment_date2: '', final_settlement: '', payment_date3: '',
 }
 
 const EMPTY = {
@@ -82,18 +109,16 @@ const EMPTY = {
   date: '', seller: '', buyer: '', status: '',
   shipment: '', quantity: '', origin: '', pol: '',
   outturn: '', nutcount: '', moisture: '', price: '',
-  pct1: '', pct2: '', pct3: '', double_penalty: '', penalty_1to1: '', nutcount_penalty: '', moisture_penalty: '',
-  advanced_payment: '', payment_date1: '', second_payment: '', payment_date2: '', final_settlement: '', payment_date3: '', note_pay: '',
-  shipping_line: '', loader: '', bl_number: '', eta_caimep: '', eta_hcm: '', eta_pod: '', notes_bill: '',
-  dhl_fedex_number: '', dhl_delivered: '', total_cont: '', cont_size: '', total_bags: '', gw_bl: '',
-  less_advance: '', discount1: '',
-  seller_invoice_amount: '', notes_invoice: '',
+  pct1: '', pct2: '', pct3: '', double_penalty: '', penalty_1to1: '', penalty_1to2: '', nutcount_penalty: '', moisture_penalty: '',
+  advanced_payment: '', payment_date1: '', note_pay: '',
   date_unload: '', supervisor: '', notes_cert: '', certificate_no: '', date_certificate: '', nw_bw: '',
   outturn_vina: '', nutcount_vina: '', moisture_vina: '',
   dem_det: '', sto: '', other_fee1: '', other_fee2: '',
   debit_credit_input: '', notes_final: '',
   commission1_usd_mt: '', pay_on_behalf1: '', notes_comm1: '',
   commission2_usd_mt: '', pay_on_behalf2: '', notes_comm2: '',
+  bls: [],
+  staff_bonuses: [],
 }
 
 const TABS = [
@@ -144,6 +169,80 @@ function Inp({ label, children }) {
   )
 }
 
+// ── One BL block — repeatable, a contract can ship across several BLs ────────
+function BlBlock({ bl, index, onChange, onRemove, price, pct3 }) {
+  const fld = (key) => (e) => onChange(index, key, e.target.value)
+  const bc = computeBl(bl, price, pct3)
+  return (
+    <div className="border-2 border-violet-200 rounded-xl p-4 bg-violet-50/30 space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-bold text-violet-700">BL #{index + 1}</span>
+        <button onClick={() => onRemove(index)} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium">
+          <Trash size={13}/> Xóa BL này
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Inp label="Shipping Line"><input className="input" value={bl.shipping_line || ''} onChange={fld('shipping_line')} /></Inp>
+        <Inp label="Loader"><input className="input" value={bl.loader || ''} onChange={fld('loader')} /></Inp>
+        <Inp label="B/L Number"><input className="input" value={bl.bl_number || ''} onChange={fld('bl_number')} /></Inp>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Inp label="ETA CAIMEP"><input type="date" className="input" value={bl.eta_caimep || ''} onChange={fld('eta_caimep')} /></Inp>
+        <Inp label="ETA HCM"><input type="date" className="input" value={bl.eta_hcm || ''} onChange={fld('eta_hcm')} /></Inp>
+        <Inp label="ETA FPOD (ngày thực tế)"><input className="input" value={bl.eta_pod || ''} onChange={fld('eta_pod')} placeholder="Nhập ngày thực tế" /></Inp>
+      </div>
+      <Inp label="Notes Bill"><textarea className="input" rows={2} value={bl.notes_bill || ''} onChange={fld('notes_bill')} /></Inp>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Inp label="DHL/Fedex Number"><input className="input" value={bl.dhl_fedex_number || ''} onChange={fld('dhl_fedex_number')} /></Inp>
+        <Inp label="DHL Delivered"><input type="date" className="input" value={bl.dhl_delivered || ''} onChange={fld('dhl_delivered')} /></Inp>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <Inp label="Total Cont"><input className="input" value={bl.total_cont || ''} onChange={fld('total_cont')} /></Inp>
+        <Inp label="Cont Size"><input className="input" value={bl.cont_size || ''} onChange={fld('cont_size')} placeholder="20'/40'" /></Inp>
+        <Inp label="Total Bags"><input type="number" step="1" className="input" value={bl.total_bags || ''} onChange={fld('total_bags')} /></Inp>
+        <Inp label="GW on B/L (MT)"><input type="number" step="0.001" className="input" value={bl.gw_bl || ''} onChange={fld('gw_bl')} /></Inp>
+        <div>
+          <label className="label">NW on B/L (MT)</label>
+          <input type="number" step="0.001" className="input" value={bl.nw_bl || ''} onChange={fld('nw_bl')}
+            placeholder={fmtNum(bc.nwBlAuto)} />
+          <p className="text-[10px] text-slate-400 mt-0.5">Để trống = tự tính GW − Bags/1000. Đang áp dụng: {fmtNum(bc.nwBl)} MT</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-violet-100/50 p-3 rounded-lg">
+        <CalcField label="Cargo Value = NW on B/L × Price" value={fmtUSD(bc.cargoValue)} color="violet" />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Inp label="Less Advance (-) ($)"><input type="number" step="0.01" className="input" value={bl.less_advance || ''} onChange={fld('less_advance')} placeholder="0.00 (số âm)" /></Inp>
+        <div className="flex items-end">
+          <CalcField label="Less Retention (-) = −Cargo Value × 3rd%" value={fmtUSD(bc.lessRetention)} color="violet" small />
+        </div>
+        <Inp label="Discount (-) ($)"><input type="number" step="0.01" className="input" value={bl.discount1 || ''} onChange={fld('discount1')} placeholder="0.00 (số âm)" /></Inp>
+        <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={bl.bl_other_fee || ''} onChange={fld('bl_other_fee')} placeholder="0.00 (+/-)" /></Inp>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-violet-100/50 p-3 rounded-lg">
+        <CalcField label="Amount Payable to Seller = Price × NW on B/L + Less Advance + Less Retention + Discount + Other Fee" value={fmtUSD(bc.calcBlInvoice)} color="violet" />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Inp label="Seller Invoice Amount ($)"><input type="number" step="0.01" className="input" value={bl.seller_invoice_amount || ''} onChange={fld('seller_invoice_amount')} /></Inp>
+        <Inp label="NOTES INVOICE"><input className="input" value={bl.notes_invoice || ''} onChange={fld('notes_invoice')} /></Inp>
+      </div>
+
+      <div className="pt-2 border-t border-violet-200">
+        <p className="text-xs font-bold text-emerald-700 mb-2">Thanh toán cho BL #{index + 1}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Inp label="Second Payment ($)"><input type="number" step="0.01" className="input" value={bl.second_payment || ''} onChange={fld('second_payment')} placeholder="0.00" /></Inp>
+          <Inp label="Payment Date 2"><input type="date" className="input" value={bl.payment_date2 || ''} onChange={fld('payment_date2')} /></Inp>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <Inp label="Final Settlement ($)"><input type="number" step="0.01" className="input" value={bl.final_settlement || ''} onChange={fld('final_settlement')} placeholder="0.00" /></Inp>
+          <Inp label="Payment Date 3"><input type="date" className="input" value={bl.payment_date3 || ''} onChange={fld('payment_date3')} /></Inp>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ImportEntry() {
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
@@ -168,21 +267,46 @@ export default function ImportEntry() {
 
   const fld = (key) => (e) => setForm(p => ({ ...p, [key]: e.target.value }))
 
+  const updateBl = (i, key, value) => setForm(p => {
+    const bls = [...(p.bls || [])]
+    bls[i] = { ...bls[i], [key]: value }
+    return { ...p, bls }
+  })
+  const addBl = () => {
+    if ((form.bls || []).length >= 10) { toast.error('Tối đa 10 BL'); return }
+    setForm(p => ({ ...p, bls: [...(p.bls || []), { ...EMPTY_BL }] }))
+  }
+  const removeBl = (i) => setForm(p => ({ ...p, bls: p.bls.filter((_, idx) => idx !== i) }))
+
+  const updateBonus = (i, key, value) => setForm(p => {
+    const staff_bonuses = [...(p.staff_bonuses || [])]
+    staff_bonuses[i] = { ...staff_bonuses[i], [key]: value }
+    return { ...p, staff_bonuses }
+  })
+  const addBonus = () => {
+    if ((form.staff_bonuses || []).length >= 10) { toast.error('Tối đa 10 dòng thưởng'); return }
+    setForm(p => ({ ...p, staff_bonuses: [...(p.staff_bonuses || []), { ...EMPTY_BONUS }] }))
+  }
+  const removeBonus = (i) => setForm(p => ({ ...p, staff_bonuses: p.staff_bonuses.filter((_, idx) => idx !== i) }))
+
   const openCreate = () => { setForm(EMPTY); setEditId(null); setActiveTab('contract'); setShowForm(true) }
-  const openEdit = (r) => { setForm({ ...EMPTY, ...r }); setEditId(r.id); setActiveTab('contract'); setShowForm(true) }
+  const openEdit = (r) => { setForm({ ...EMPTY, ...r, bls: r.bls && r.bls.length > 0 ? r.bls : [], staff_bonuses: r.staff_bonuses || [] }); setEditId(r.id); setActiveTab('contract'); setShowForm(true) }
   const openView = async (r) => { const res = await api.get(`/import-records/${r.id}`); setViewRecord(res.data) }
 
-  const save = async () => {
-    if (!form.sale_contract) { toast.error('Vui lòng nhập Sale Contract'); setActiveTab('contract'); return }
+  const save = async (opts = {}) => {
+    if (!form.sale_contract) { toast.error('Vui lòng nhập Sale Contract'); setActiveTab('contract'); return false }
     setSaving(true)
     try {
-      if (editId) await api.put(`/import-records/${editId}`, form)
-      else await api.post('/import-records', form)
-      toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới')
-      setShowForm(false); load()
-    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu') }
+      const res = editId ? await api.put(`/import-records/${editId}`, form) : await api.post('/import-records', form)
+      if (!editId && res.data?.id) setEditId(res.data.id)
+      if (opts.close === false) toast.success('Đã lưu', { duration: 1200 })
+      else { toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới'); setShowForm(false); load() }
+      return true
+    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu'); return false }
     finally { setSaving(false) }
   }
+
+  const goNext = async (tab) => { if (await save({ close: false })) setActiveTab(tab) }
 
   const remove = async (id) => {
     if (!confirm('Xóa bản ghi này?')) return
@@ -193,6 +317,7 @@ export default function ImportEntry() {
   // ── VIEW DETAIL ──────────────────────────────────────────────────────────────
   if (viewRecord) {
     const vc = compute(viewRecord)
+    const bls = viewRecord.bls || []
     const Row = ({ label, value, isCalc }) => (
       <div className={`flex items-start justify-between py-1.5 border-b border-slate-100 last:border-0 ${isCalc ? 'bg-blue-50 px-2 rounded my-0.5' : ''}`}>
         <span className="text-xs text-slate-500 w-56 shrink-0">{label}</span>
@@ -236,42 +361,40 @@ export default function ImportEntry() {
             <Row label="1st %" value={viewRecord.pct1} />
             <Row label="2nd %" value={viewRecord.pct2} />
             <Row label="3rd %" value={viewRecord.pct3} />
-            <Row label="Double Penalty (lbs)" value={viewRecord.double_penalty} />
-            <Row label="1:1 Penalty ($)" value={fmtUSD(viewRecord.penalty_1to1)} />
-            <Row label="✦ 1:2 Penalty ($)" value={fmtUSD(vc.penalty_1to2)} isCalc />
+            <Row label="Double Penalty below (lbs)" value={viewRecord.double_penalty} />
+            <Row label="✦ 1:1 Penalty ($) — áp dụng" value={fmtUSD(vc.p1to1)} isCalc />
+            <Row label="✦ 1:2 Penalty ($) — áp dụng" value={fmtUSD(vc.penalty_1to2)} isCalc />
             <Row label="Nutcount Penalty" value={viewRecord.nutcount_penalty} />
             <Row label="Moisture Penalty" value={viewRecord.moisture_penalty} />
           </Sec>
           <Sec title="② Thanh Toán" color="border-emerald-500">
             <Row label="Advanced Payment ($)" value={fmtUSD(viewRecord.advanced_payment)} />
             <Row label="Payment Date 1" value={viewRecord.payment_date1} />
-            <Row label="Second Payment ($)" value={fmtUSD(viewRecord.second_payment)} />
-            <Row label="Payment Date 2" value={viewRecord.payment_date2} />
-            <Row label="Final Settlement ($)" value={fmtUSD(viewRecord.final_settlement)} />
-            <Row label="Payment Date 3" value={viewRecord.payment_date3} />
+            <Row label="Note Pay" value={viewRecord.note_pay} />
+            <Row label="✦ Tổng Second Payment (mọi BL)" value={fmtUSD(vc.secPayTotal)} isCalc />
+            <Row label="✦ Tổng Final Settlement (mọi BL)" value={fmtUSD(vc.finalSettlementTotal)} isCalc />
+            <div className="text-[11px] text-slate-400 italic pt-1">Chi tiết theo từng BL — xem mục ③</div>
           </Sec>
           <Sec title="③ Vận Chuyển / B/L" color="border-violet-500">
-            <Row label="Shipping Line" value={viewRecord.shipping_line} />
-            <Row label="Loader" value={viewRecord.loader} />
-            <Row label="B/L Number" value={viewRecord.bl_number} />
-            <Row label="ETA CAIMEP" value={viewRecord.eta_caimep} />
-            <Row label="ETA HCM" value={viewRecord.eta_hcm} />
-            <Row label="ETA POD" value={viewRecord.eta_pod} />
-            <Row label="Notes Bill" value={viewRecord.notes_bill} />
-            <Row label="DHL/Fedex Number" value={viewRecord.dhl_fedex_number} />
-            <Row label="DHL Delivered" value={viewRecord.dhl_delivered} />
-            <Row label="Total Cont" value={viewRecord.total_cont} />
-            <Row label="Cont Size" value={viewRecord.cont_size} />
-            <Row label="Total Bags" value={viewRecord.total_bags} />
-            <Row label="GW on B/L (MT)" value={viewRecord.gw_bl} />
-            <Row label="✦ NW on B/L (MT)" value={fmtNum(vc.nwBl)} isCalc />
-            <Row label="✦ Cargo Value = NW × Price" value={fmtUSD(vc.cargoValue)} isCalc />
-            <Row label="Less Advance (-)" value={viewRecord.less_advance} />
-            <Row label="✦ Less Retention (-)" value={fmtUSD(vc.lessRetention)} isCalc />
-            <Row label="Discount (-)" value={viewRecord.discount1} />
-            <Row label="✦ Amount Payable to Seller" value={fmtUSD(vc.calcBlInvoice)} isCalc />
-            <Row label="Seller Invoice Amount ($)" value={fmtUSD(viewRecord.seller_invoice_amount)} />
-            <Row label="Notes Invoice" value={viewRecord.notes_invoice} />
+            {bls.length === 0 ? <div className="text-xs text-slate-400">Chưa có BL nào</div> : bls.map((bl, i) => {
+              const bc = computeBl(bl, n(viewRecord.price), n(viewRecord.pct3))
+              return (
+                <div key={bl.id ?? i} className="mb-3 pb-3 border-b border-slate-100 last:border-0 last:mb-0 last:pb-0">
+                  <div className="text-xs font-bold text-violet-700 mb-1">BL #{i + 1} — {bl.bl_number || '(chưa có số BL)'}</div>
+                  <Row label="Shipping Line / Loader" value={`${bl.shipping_line || '—'} / ${bl.loader || '—'}`} />
+                  <Row label="ETA CAIMEP / HCM / FPOD" value={`${bl.eta_caimep || '—'} / ${bl.eta_hcm || '—'} / ${bl.eta_pod || '—'}`} />
+                  <Row label="Total Cont / Size / Bags" value={`${bl.total_cont || '—'} / ${bl.cont_size || '—'} / ${bl.total_bags || '—'}`} />
+                  <Row label="GW on B/L (MT)" value={bl.gw_bl} />
+                  <Row label="✦ NW on B/L (MT)" value={fmtNum(bc.nwBl)} isCalc />
+                  <Row label="✦ Cargo Value" value={fmtUSD(bc.cargoValue)} isCalc />
+                  <Row label="Less Advance / Discount / Other Fee" value={`${fmtUSD(bl.less_advance)} / ${fmtUSD(bl.discount1)} / ${fmtUSD(bl.bl_other_fee)}`} />
+                  <Row label="✦ Amount Payable to Seller" value={fmtUSD(bc.calcBlInvoice)} isCalc />
+                  <Row label="Seller Invoice Amount ($)" value={fmtUSD(bl.seller_invoice_amount)} />
+                  <Row label="Second Payment ($)" value={fmtUSD(bl.second_payment)} />
+                  <Row label="Final Settlement ($)" value={fmtUSD(bl.final_settlement)} />
+                </div>
+              )
+            })}
           </Sec>
           <Sec title="④ Kiểm Tra CL" color="border-amber-500">
             <Row label="Date Unload Cargo" value={viewRecord.date_unload} />
@@ -279,7 +402,7 @@ export default function ImportEntry() {
             <Row label="Certificate No" value={viewRecord.certificate_no} />
             <Row label="Date of Certificate" value={viewRecord.date_certificate} />
             <Row label="NW as Vina/CF (MT)" value={viewRecord.nw_bw} />
-            <Row label="✦ Shortage/Overtage" value={fmtNum(vc.shortageOvertage)} isCalc />
+            <Row label="✦ Shortage/Overtage (vs tổng NW BL)" value={fmtNum(vc.shortageOvertage)} isCalc />
             <Row label="Outturn Vina/CF (lbs)" value={viewRecord.outturn_vina} />
             <Row label="Nutcount Vina/CF" value={viewRecord.nutcount_vina} />
             <Row label="Moisture Vina/CF" value={viewRecord.moisture_vina} />
@@ -350,18 +473,18 @@ export default function ImportEntry() {
                 <Inp label="Agency"><input className="input" value={form.agency} onChange={fld('agency')} /></Inp>
                 <Inp label="Order/Note"><input className="input" value={form.order_note} onChange={fld('order_note')} /></Inp>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Inp label="Sale Contract *"><input className="input" value={form.sale_contract} onChange={fld('sale_contract')} placeholder="VD: SC-2025-001" /></Inp>
                 <Inp label="Date"><input type="date" className="input" value={form.date} onChange={fld('date')} /></Inp>
-                <Inp label="Status"><input className="input" value={form.status} onChange={fld('status')} placeholder="ACTIVE / CLOSED..." /></Inp>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Inp label="Seller (bên bán)"><input className="input" value={form.seller} onChange={fld('seller')} /></Inp>
                 <Inp label="Buyer (bên mua)"><input className="input" value={form.buyer} onChange={fld('buyer')} /></Inp>
+                <Inp label="Status"><input className="input" value={form.status} onChange={fld('status')} placeholder="ACTIVE / CLOSED..." /></Inp>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Inp label="Shipment (ngày giao hàng)">
-                  <input type="date" className="input" value={form.shipment} onChange={fld('shipment')} />
+                  <input className="input" value={form.shipment} onChange={fld('shipment')} placeholder="VD: AFLOAT hoặc July-August, 2026" />
                 </Inp>
                 <Inp label="Quantity (MT)"><input type="number" step="0.001" className="input" value={form.quantity} onChange={fld('quantity')} placeholder="0.000" /></Inp>
                 <Inp label="Origin"><input className="input" value={form.origin} onChange={fld('origin')} /></Inp>
@@ -380,18 +503,24 @@ export default function ImportEntry() {
                 <Inp label="1st (%)"><input type="number" step="0.01" className="input" value={form.pct1} onChange={fld('pct1')} placeholder="0.00" /></Inp>
                 <Inp label="2nd (%)"><input type="number" step="0.01" className="input" value={form.pct2} onChange={fld('pct2')} placeholder="0.00" /></Inp>
                 <Inp label="3rd (%)"><input type="number" step="0.01" className="input" value={form.pct3} onChange={fld('pct3')} placeholder="0.00" /></Inp>
-                <Inp label="Double Penalty (lbs, số âm)"><input type="number" step="0.01" className="input" value={form.double_penalty} onChange={fld('double_penalty')} placeholder="-2.00" /></Inp>
+                <Inp label="Double Penalty below (lbs, số dương)"><input type="number" step="0.01" className="input" value={form.double_penalty} onChange={fld('double_penalty')} placeholder="2.00" /></Inp>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Inp label="1:1 Penalty ($)"><input type="number" step="0.0001" className="input" value={form.penalty_1to1} onChange={fld('penalty_1to1')} placeholder="0.00" /></Inp>
-                <div className="flex items-end">
-                  <CalcField label="[15] 1:2 Penalty = 1:1 × 2" value={fmtUSD(c.penalty_1to2)} color="blue" small />
+                <div>
+                  <label className="label">1:1 Penalty ($)</label>
+                  <input type="number" step="0.0001" className="input" value={form.penalty_1to1} onChange={fld('penalty_1to1')} placeholder={fmtUSD(c.p1to1Auto)} />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Để trống = tự tính Price/Outturn. Đang áp dụng: {fmtUSD(c.p1to1)}</p>
+                </div>
+                <div>
+                  <label className="label">1:2 Penalty ($)</label>
+                  <input type="number" step="0.0001" className="input" value={form.penalty_1to2} onChange={fld('penalty_1to2')} placeholder={fmtUSD(c.p1to2Auto)} />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Để trống = tự tính 1:1 × 2. Đang áp dụng: {fmtUSD(c.penalty_1to2)}</p>
                 </div>
                 <Inp label="Nutcount Penalty ($)"><input type="number" step="0.0001" className="input" value={form.nutcount_penalty} onChange={fld('nutcount_penalty')} placeholder="0.00" /></Inp>
                 <Inp label="Moisture Penalty ($)"><input type="number" step="0.0001" className="input" value={form.moisture_penalty} onChange={fld('moisture_penalty')} placeholder="0.00" /></Inp>
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('payment')} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('payment')} disabled={saving} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -404,68 +533,37 @@ export default function ImportEntry() {
                 <Inp label="Prepayment / 1st Payment ($)"><input type="number" step="0.01" className="input" value={form.advanced_payment} onChange={fld('advanced_payment')} placeholder="0.00" /></Inp>
                 <Inp label="Payment Date"><input type="date" className="input" value={form.payment_date1} onChange={fld('payment_date1')} /></Inp>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Second Payment ($)"><input type="number" step="0.01" className="input" value={form.second_payment} onChange={fld('second_payment')} placeholder="0.00" /></Inp>
-                <Inp label="Payment Date 2"><input type="date" className="input" value={form.payment_date2} onChange={fld('payment_date2')} /></Inp>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Final Settlement ($)"><input type="number" step="0.01" className="input" value={form.final_settlement} onChange={fld('final_settlement')} placeholder="0.00" /></Inp>
-                <Inp label="Payment Date 3"><input type="date" className="input" value={form.payment_date3} onChange={fld('payment_date3')} /></Inp>
-              </div>
               <Inp label="NOTE PAY"><input className="input" value={form.note_pay || ''} onChange={fld('note_pay')} /></Inp>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                Second Payment và Final Settlement được nhập riêng cho từng BL — xem tab "③ Vận Chuyển / B/L".
+              </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('shipment')} className="btn-secondary">Tiếp: Vận Chuyển <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('shipment')} disabled={saving} className="btn-secondary">Tiếp: Vận Chuyển <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
 
           {/* ③ VẬN CHUYỂN / B/L */}
           {activeTab === 'shipment' && (
-            <div className="space-y-5">
-              <h2 className="font-bold text-violet-700 border-b border-violet-100 pb-2">③ Vận Chuyển / Bill of Lading</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Inp label="Shipping Line"><input className="input" value={form.shipping_line || ''} onChange={fld('shipping_line')} /></Inp>
-                <Inp label="Loader"><input className="input" value={form.loader || ''} onChange={fld('loader')} /></Inp>
-                <Inp label="B/L Number"><input className="input" value={form.bl_number} onChange={fld('bl_number')} /></Inp>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-violet-100 pb-2">
+                <h2 className="font-bold text-violet-700">③ Vận Chuyển / Bill of Lading ({(form.bls || []).length}/10 BL)</h2>
+                <button onClick={addBl} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  <PlusCircle size={14} /> Thêm BL
+                </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Inp label="ETA CAIMEP"><input type="date" className="input" value={form.eta_caimep} onChange={fld('eta_caimep')} /></Inp>
-                <Inp label="ETA HCM"><input type="date" className="input" value={form.eta_hcm} onChange={fld('eta_hcm')} /></Inp>
-                <Inp label="ETA FPOD (ngày thực tế)"><input className="input" value={form.eta_pod} onChange={fld('eta_pod')} placeholder="Nhập ngày thực tế" /></Inp>
-              </div>
-              <Inp label="Notes Bill"><textarea className="input" rows={2} value={form.notes_bill} onChange={fld('notes_bill')} /></Inp>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="DHL/Fedex Number"><input className="input" value={form.dhl_fedex_number} onChange={fld('dhl_fedex_number')} /></Inp>
-                <Inp label="DHL Delivered"><input type="date" className="input" value={form.dhl_delivered} onChange={fld('dhl_delivered')} /></Inp>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <Inp label="Total Cont"><input className="input" value={form.total_cont} onChange={fld('total_cont')} /></Inp>
-                <Inp label="Cont Size"><input className="input" value={form.cont_size} onChange={fld('cont_size')} placeholder="20'/40'" /></Inp>
-                <Inp label="Total Bags"><input type="number" step="1" className="input" value={form.total_bags} onChange={fld('total_bags')} /></Inp>
-                <Inp label="GW on B/L (MT)"><input type="number" step="0.001" className="input" value={form.gw_bl} onChange={fld('gw_bl')} /></Inp>
-                <div className="flex items-end">
-                  <CalcField label="NW on B/L = GW − Bags/1000 (MT)" value={`${fmtNum(c.nwBl)} MT`} color="violet" small />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-violet-50 p-3 rounded-lg">
-                <CalcField label="Cargo Value = NW on B/L × Price" value={fmtUSD(c.cargoValue)} color="violet" />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Inp label="Less Advance (-) ($)"><input type="number" step="0.01" className="input" value={form.less_advance} onChange={fld('less_advance')} placeholder="0.00 (số âm)" /></Inp>
-                <div className="flex items-end">
-                  <CalcField label="Less Retention (-) = −Cargo Value × 3rd%" value={fmtUSD(c.lessRetention)} color="violet" small />
-                </div>
-                <Inp label="Discount (-) ($)"><input type="number" step="0.01" className="input" value={form.discount1} onChange={fld('discount1')} placeholder="0.00 (số âm)" /></Inp>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-violet-50 p-3 rounded-lg">
-                <CalcField label="Amount Payable to Seller = Price × NW on B/L + Less Advance + Less Retention + Discount" value={fmtUSD(c.calcBlInvoice)} color="violet" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Inp label="Seller Invoice Amount ($)"><input type="number" step="0.01" className="input" value={form.seller_invoice_amount} onChange={fld('seller_invoice_amount')} /></Inp>
-                <Inp label="NOTES INVOICE"><input className="input" value={form.notes_invoice} onChange={fld('notes_invoice')} /></Inp>
+              <div className="space-y-4">
+                {(form.bls || []).map((bl, i) => (
+                  <BlBlock key={i} bl={bl} index={i} onChange={updateBl} onRemove={removeBl} price={n(form.price)} pct3={n(form.pct3)} />
+                ))}
+                {(form.bls || []).length === 0 && (
+                  <button onClick={addBl} className="w-full border-2 border-dashed border-slate-300 rounded-lg p-4 text-sm text-slate-400 hover:border-violet-400 hover:text-violet-600 transition-colors">
+                    + Thêm BL đầu tiên (hợp đồng có thể xếp 1 hoặc nhiều BL)
+                  </button>
+                )}
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('quality')} className="btn-secondary">Tiếp: Kiểm Tra CL <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('quality')} disabled={saving} className="btn-secondary">Tiếp: Kiểm Tra CL <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -488,7 +586,7 @@ export default function ImportEntry() {
                   <input type="number" step="0.001" className="input" value={form.nw_bw} onChange={fld('nw_bw')} placeholder="0.000" />
                 </Inp>
                 <div className="flex items-end">
-                  <CalcField label="[6] Shortage/Overtage = NW_Vina − NW_BL" value={`${fmtNum(c.shortageOvertage)} MT`} color={c.shortageOvertage < 0 ? 'red' : 'green'} small />
+                  <CalcField label="[6] Shortage/Overtage = NW_Vina − Tổng NW mọi BL" value={`${fmtNum(c.shortageOvertage)} MT`} color={c.shortageOvertage < 0 ? 'red' : 'green'} small />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -510,7 +608,7 @@ export default function ImportEntry() {
                 <CalcField label="Moisture Claim ($)" value={fmtUSD(c.moistureClaim)} color="amber" note="Nếu Diff Moisture > 0" />
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('settlement')} className="btn-secondary">Tiếp: Quyết Toán <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('settlement')} disabled={saving} className="btn-secondary">Tiếp: Quyết Toán <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -527,7 +625,7 @@ export default function ImportEntry() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-red-50 p-3 rounded-lg">
                 <CalcField label="Calculate Debit/Credit" value={fmtUSD(c.calcDebitCredit)} color={c.calcDebitCredit >= 0 ? 'green' : 'red'}
-                  note="= Price×NW_Vina − 2nd Payment + Less Advance − 1:1 Claim − 1:2 Claim − Nutcount − Moisture − DEM/DET − STO − Fees" />
+                  note="= Price×NW_Vina − Tổng 2nd Payment + Tổng Less Advance − 1:1 Claim − 1:2 Claim − Nutcount − Moisture − DEM/DET − STO − Fees" />
                 <div className={`rounded-lg border-2 p-3 ${c.notesDebitCredit.includes('Buyer') && !c.notesDebitCredit.includes('Seller has') ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
                   <div className="text-xs text-slate-500 mb-1 flex items-center gap-1"><Calculator size={12}/> [10] Notes — Bên thanh toán</div>
                   <div className="text-sm font-bold text-slate-800 italic">"{c.notesDebitCredit}"</div>
@@ -539,14 +637,14 @@ export default function ImportEntry() {
                 </Inp>
                 <div className={`flex items-end pb-1`}>
                   <div className={`rounded-lg border-2 p-3 w-full ${c.statusSettlement === 'CLOSED' ? 'border-emerald-400 bg-emerald-50' : 'border-red-400 bg-red-50'}`}>
-                    <div className="text-xs text-slate-500 mb-1">[12] Status Settlement</div>
+                    <div className="text-xs text-slate-500 mb-1">[12] Status Settlement (so với Tổng Final Settlement mọi BL: {fmtUSD(c.finalSettlementTotal)})</div>
                     <div className={`text-xl font-black ${c.statusSettlement === 'CLOSED' ? 'text-emerald-700' : 'text-red-700'}`}>{c.statusSettlement}</div>
                   </div>
                 </div>
               </div>
               <Inp label="[13] Notes Final"><input className="input" value={form.notes_final} onChange={fld('notes_final')} placeholder="Ghi chú quyết toán..." /></Inp>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('commission')} className="btn-secondary">Tiếp: Hoa Hồng <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('commission')} disabled={saving} className="btn-secondary">Tiếp: Hoa Hồng <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -577,6 +675,9 @@ export default function ImportEntry() {
                   <Inp label="Notes Broker COM"><input className="input" value={form.notes_comm2} onChange={fld('notes_comm2')} /></Inp>
                 </div>
               </div>
+
+              <StaffBonusTable rows={form.staff_bonuses} onChange={updateBonus} onAdd={addBonus} onRemove={removeBonus} contractValue={c.contractValue} />
+
               <div className="flex justify-between pt-4 border-t">
                 <button onClick={() => setActiveTab('settlement')} className="btn-secondary">← Quyết Toán</button>
                 <button onClick={save} disabled={saving} className="btn-primary"><Save size={15}/> {saving ? 'Đang lưu...' : '💾 Lưu toàn bộ'}</button>
@@ -598,6 +699,7 @@ export default function ImportEntry() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input placeholder="Tìm SC, seller, buyer..." value={search} onChange={e => setSearch(e.target.value)} className="input pl-9 w-64" />
           </div>
+          <ExcelImportExport resource="import-records" filename="mau_nhap_lieu_import" onImported={load} />
           <button onClick={openCreate} className="btn-primary"><Plus size={15}/> Nhập mới</button>
         </div>
       </div>

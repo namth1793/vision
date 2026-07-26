@@ -1,7 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const db = require('../db/database');
 const { authenticate } = require('../middleware/auth');
+const { buildTemplateBuffer, parseUploadBuffer, bulkUpsert } = require('../utils/excel');
+const LABELS = require('../utils/labels').TRADES;
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+const FIELDS = [
+  'staff', 'broker', 'year', 'contract_no', 'contract_date', 'seller', 'buyer', 'status',
+  'ship_date', 'qty', 'origin', 'pol', 'lbs', 'nut', 'price', 'retention', 'double_penalty', 'notes1',
+  'advanced_payment', 'second_payment', 'final_settlement',
+  'line_loader', 'bl_number', 'eta_caimep', 'eta_hcm', 'eta_pod', 'notes2',
+  'dhl_fedex_number', 'dhl_delivered', 'total_cont', 'cont_size', 'bags', 'gw_bl', 'nw_bl', 'advanced_paid_bl',
+  'date_unload', 'notes3', 'certificate_no', 'date_certificate', 'nw_bw', 'outturn_vina', 'nutcount_vina',
+  'outturn_claim_1to1', 'outturn_claim_1to2',
+  'dem_det', 'sto', 'other_fee1', 'other_fee2', 'notes6',
+  'commission_rate', 'pay_on_behalf', 'notes7', 'fee_from_buyer',
+];
 
 // ── Audit log helper ─────────────────────────────────────────────────────────
 function writeLog(action, record, user, oldRecord) {
@@ -48,6 +65,25 @@ function writeLog(action, record, user, oldRecord) {
       user.id, user.name, user.role, summary, detail);
   } catch (e) { /* log errors are non-fatal */ }
 }
+
+// ── Excel template / import ───────────────────────────────────────────────────
+router.get('/template', authenticate, (req, res) => {
+  try {
+    const buf = buildTemplateBuffer(FIELDS, LABELS, 'Trades');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="mau_nhap_lieu_trades.xlsx"');
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/upload', authenticate, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Không có file' });
+    const rows = parseUploadBuffer(req.file.buffer, FIELDS);
+    const result = bulkUpsert(db, 'trade_records', FIELDS, rows, req.user.id);
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ── GET all trade records ─────────────────────────────────────────────────────
 router.get('/', authenticate, (req, res) => {

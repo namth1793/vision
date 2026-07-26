@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/axios'
+import ExcelImportExport from '../components/ExcelImportExport'
 
 const n = (v) => parseFloat(v) || 0
 const fmtUSD = (v) => (v == null || isNaN(v)) ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -123,17 +124,20 @@ export default function BwhEntry() {
   const openEdit = (r) => { setForm({ ...EMPTY, ...r }); setEditId(r.id); setActiveTab('info'); setShowForm(true) }
   const openView = async (r) => { const res = await api.get(`/bwh-records/${r.id}`); setViewRecord(res.data) }
 
-  const save = async () => {
-    if (!form.bwh && !form.bl) { toast.error('Vui lòng nhập BWH hoặc BL'); setActiveTab('info'); return }
+  const save = async (opts = {}) => {
+    if (!form.bwh && !form.bl) { toast.error('Vui lòng nhập BWH hoặc BL'); setActiveTab('info'); return false }
     setSaving(true)
     try {
-      if (editId) await api.put(`/bwh-records/${editId}`, form)
-      else await api.post('/bwh-records', form)
-      toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới')
-      setShowForm(false); load()
-    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu') }
+      const res = editId ? await api.put(`/bwh-records/${editId}`, form) : await api.post('/bwh-records', form)
+      if (!editId && res.data?.id) setEditId(res.data.id)
+      if (opts.close === false) toast.success('Đã lưu', { duration: 1200 })
+      else { toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới'); setShowForm(false); load() }
+      return true
+    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu'); return false }
     finally { setSaving(false) }
   }
+
+  const goNext = async (tab) => { if (await save({ close: false })) setActiveTab(tab) }
 
   const remove = async (id) => {
     if (!confirm('Xóa bản ghi này?')) return
@@ -285,7 +289,7 @@ export default function BwhEntry() {
               </div>
               <Inp label="NOTE TT KHO"><textarea className="input" rows={2} value={form.note_tt_kho} onChange={fld('note_tt_kho')} /></Inp>
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('warehouse')} className="btn-secondary">Tiếp: Nhập/Xuất Kho <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('warehouse')} disabled={saving} className="btn-secondary">Tiếp: Nhập/Xuất Kho <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -338,7 +342,7 @@ export default function BwhEntry() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <button onClick={() => setActiveTab('insurance')} className="btn-secondary">Tiếp: Bảo Hiểm & TT <ChevronRight size={15}/></button>
+                <button onClick={() => goNext('insurance')} disabled={saving} className="btn-secondary">Tiếp: Bảo Hiểm & TT <ChevronRight size={15}/></button>
               </div>
             </div>
           )}
@@ -420,6 +424,7 @@ export default function BwhEntry() {
             <option value="">Tất cả</option>
             {BWH_STATUS.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+          <ExcelImportExport resource="bwh-records" filename="mau_nhap_lieu_kho_ngoai_quan" onImported={load} />
           <button onClick={openCreate} className="btn-primary"><Plus size={15}/> Nhập mới</button>
         </div>
       </div>

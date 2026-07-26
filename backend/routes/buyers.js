@@ -3,117 +3,124 @@ const router = express.Router();
 const db = require('../db/database');
 const { authenticate } = require('../middleware/auth');
 
-// ── GET all buyers ──────────────────────────────────────────────────────────
+const COMPANY_TYPES = ['Buyer', 'Seller', 'Partner', 'Shipping Line', 'Khác'];
+
+// Display name is auto-derived from the first non-empty line of the
+// consolidated company info block — there is no dedicated "name" input.
+function deriveName(en, vi) {
+  const src = (en || vi || '').trim();
+  const firstLine = src.split('\n').map(l => l.trim()).find(Boolean);
+  return firstLine || 'Chưa đặt tên';
+}
+
+const bankStmt = db.prepare('SELECT id, bank_info, is_primary FROM company_banks WHERE buyer_id = ? ORDER BY is_primary DESC, id ASC');
+const gpxkStmt = db.prepare('SELECT id, country_type, cert_no, issue_date, expiry_date, notes FROM company_gpxk WHERE buyer_id = ? ORDER BY expiry_date ASC, id ASC');
+
+function attach(buyer) {
+  buyer.banks = bankStmt.all(buyer.id);
+  buyer.gpxk = gpxkStmt.all(buyer.id);
+  return buyer;
+}
+
+// ── GET all companies ───────────────────────────────────────────────────────
 router.get('/', authenticate, (req, res) => {
   try {
     let q = 'SELECT * FROM buyers';
     const params = [], cond = [];
+    if (req.query.company_type) { cond.push('company_type = ?'); params.push(req.query.company_type); }
     if (req.query.search) {
       const s = `%${req.query.search}%`;
-      cond.push(`(buyer_name LIKE ? OR company_address LIKE ? OR company_vi LIKE ?
-        OR email LIKE ? OR phone LIKE ? OR tax_code LIKE ?)`);
+      // Excel-style search: matches name, either language block, or any
+      // bank's free-text info (e.g. typing an account number finds the company).
+      cond.push(`(
+        buyer_name LIKE ? OR company_info_en LIKE ? OR company_info_vi LIKE ?
+        OR EXISTS (SELECT 1 FROM company_banks cb WHERE cb.buyer_id = buyers.id AND cb.bank_info LIKE ?)
+        OR EXISTS (SELECT 1 FROM company_gpxk cg WHERE cg.buyer_id = buyers.id AND (cg.country_type LIKE ? OR cg.cert_no LIKE ?))
+      )`);
       params.push(s, s, s, s, s, s);
     }
     if (cond.length) q += ' WHERE ' + cond.join(' AND ');
     q += ' ORDER BY buyer_name ASC';
     const buyers = db.prepare(q).all(...params);
-
-    // Attach banks to each buyer
-    const bankStmt = db.prepare('SELECT * FROM company_banks WHERE buyer_id = ? ORDER BY is_primary DESC, id ASC');
-    const result = buyers.map(b => ({ ...b, banks: bankStmt.all(b.id) }));
-    res.json(result);
+    res.json(buyers.map(attach));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Search buyers by bank account number
-router.get('/search-bank', authenticate, (req, res) => {
-  try {
-    const { account_no } = req.query;
-    if (!account_no) return res.json([]);
-    const rows = db.prepare(`
-      SELECT b.*, cb.bank_name, cb.account_no, cb.swift_bic
-      FROM buyers b
-      JOIN company_banks cb ON cb.buyer_id = b.id
-      WHERE cb.account_no LIKE ?
-      ORDER BY b.buyer_name ASC
-    `).all(`%${account_no}%`);
-    res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+router.get('/company-types', authenticate, (req, res) => res.json(COMPANY_TYPES));
 
-// ── GET single buyer ─────────────────────────────────────────────────────────
+// ── GET single company ──────────────────────────────────────────────────────
 router.get('/:id', authenticate, (req, res) => {
   try {
     const r = db.prepare('SELECT * FROM buyers WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Không tìm thấy' });
-    r.banks = db.prepare('SELECT * FROM company_banks WHERE buyer_id = ? ORDER BY is_primary DESC, id ASC').all(r.id);
-    res.json(r);
+    res.json(attach(r));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── CREATE buyer ─────────────────────────────────────────────────────────────
+// ── CREATE company ──────────────────────────────────────────────────────────
 router.post('/', authenticate, (req, res) => {
   try {
-    const { buyer_name, company_address, company_vi, tax_code, email, phone, notes, banks } = req.body;
-    if (!buyer_name) return res.status(400).json({ error: 'Buyer name is required' });
+    const { company_info_en, company_info_vi, company_type, notes, banks, gpxk } = req.body;
+    if (!company_info_en?.trim() && !company_info_vi?.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập thông tin công ty (tiếng Anh hoặc tiếng Việt)' });
+    }
+    const buyer_name = deriveName(company_info_en, company_info_vi);
     const result = db.prepare(`
-      INSERT INTO buyers (buyer_name, company_address, company_vi, tax_code, email, phone, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(buyer_name, company_address||null, company_vi||null, tax_code||null,
-           email||null, phone||null, notes||null, req.user.id);
+      INSERT INTO buyers (buyer_name, company_info_en, company_info_vi, company_type, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(buyer_name, company_info_en || null, company_info_vi || null, company_type || null, notes || null, req.user.id);
     const buyerId = result.lastInsertRowid;
 
-    // Insert banks
     if (Array.isArray(banks)) {
-      const ins = db.prepare(`INSERT INTO company_banks
-        (buyer_id, bank_name, account_no, swift_bic, iban, bank_branch, bank_address, currency, notes, is_primary)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`);
-      banks.forEach((bk, i) => {
-        ins.run(buyerId, bk.bank_name||null, bk.account_no||null, bk.swift_bic||null,
-          bk.iban||null, bk.bank_branch||null, bk.bank_address||null, bk.currency||'USD',
-          bk.notes||null, i === 0 ? 1 : 0);
-      });
+      const ins = db.prepare('INSERT INTO company_banks (buyer_id, bank_info, is_primary) VALUES (?,?,?)');
+      banks.filter(bk => bk.bank_info?.trim()).forEach((bk, i) => ins.run(buyerId, bk.bank_info, i === 0 ? 1 : 0));
+    }
+    if (Array.isArray(gpxk)) {
+      const ins = db.prepare('INSERT INTO company_gpxk (buyer_id, country_type, cert_no, issue_date, expiry_date, notes) VALUES (?,?,?,?,?,?)');
+      gpxk.filter(g => g.country_type?.trim() || g.cert_no?.trim())
+        .forEach(g => ins.run(buyerId, g.country_type || null, g.cert_no || null, g.issue_date || null, g.expiry_date || null, g.notes || null));
     }
 
     const buyer = db.prepare('SELECT * FROM buyers WHERE id=?').get(buyerId);
-    buyer.banks = db.prepare('SELECT * FROM company_banks WHERE buyer_id=? ORDER BY is_primary DESC, id ASC').all(buyerId);
-    res.status(201).json(buyer);
+    res.status(201).json(attach(buyer));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── UPDATE buyer ─────────────────────────────────────────────────────────────
+// ── UPDATE company ──────────────────────────────────────────────────────────
 router.put('/:id', authenticate, (req, res) => {
   try {
-    const { buyer_name, company_address, company_vi, tax_code, email, phone, notes, banks } = req.body;
+    const { company_info_en, company_info_vi, company_type, notes, banks, gpxk } = req.body;
+    if (!company_info_en?.trim() && !company_info_vi?.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập thông tin công ty (tiếng Anh hoặc tiếng Việt)' });
+    }
+    const buyer_name = deriveName(company_info_en, company_info_vi);
     db.prepare(`
-      UPDATE buyers SET buyer_name=?, company_address=?, company_vi=?, tax_code=?, email=?, phone=?, notes=?,
+      UPDATE buyers SET buyer_name=?, company_info_en=?, company_info_vi=?, company_type=?, notes=?,
       updated_at=datetime('now','localtime') WHERE id=?
-    `).run(buyer_name, company_address||null, company_vi||null, tax_code||null,
-           email||null, phone||null, notes||null, req.params.id);
+    `).run(buyer_name, company_info_en || null, company_info_vi || null, company_type || null, notes || null, req.params.id);
 
-    // Replace banks
     if (Array.isArray(banks)) {
       db.prepare('DELETE FROM company_banks WHERE buyer_id=?').run(req.params.id);
-      const ins = db.prepare(`INSERT INTO company_banks
-        (buyer_id, bank_name, account_no, swift_bic, iban, bank_branch, bank_address, currency, notes, is_primary)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`);
-      banks.forEach((bk, i) => {
-        ins.run(req.params.id, bk.bank_name||null, bk.account_no||null, bk.swift_bic||null,
-          bk.iban||null, bk.bank_branch||null, bk.bank_address||null, bk.currency||'USD',
-          bk.notes||null, i === 0 ? 1 : 0);
-      });
+      const ins = db.prepare('INSERT INTO company_banks (buyer_id, bank_info, is_primary) VALUES (?,?,?)');
+      banks.filter(bk => bk.bank_info?.trim()).forEach((bk, i) => ins.run(req.params.id, bk.bank_info, i === 0 ? 1 : 0));
+    }
+    if (Array.isArray(gpxk)) {
+      db.prepare('DELETE FROM company_gpxk WHERE buyer_id=?').run(req.params.id);
+      const ins = db.prepare('INSERT INTO company_gpxk (buyer_id, country_type, cert_no, issue_date, expiry_date, notes) VALUES (?,?,?,?,?,?)');
+      gpxk.filter(g => g.country_type?.trim() || g.cert_no?.trim())
+        .forEach(g => ins.run(req.params.id, g.country_type || null, g.cert_no || null, g.issue_date || null, g.expiry_date || null, g.notes || null));
     }
 
     const buyer = db.prepare('SELECT * FROM buyers WHERE id=?').get(req.params.id);
-    buyer.banks = db.prepare('SELECT * FROM company_banks WHERE buyer_id=? ORDER BY is_primary DESC, id ASC').all(req.params.id);
-    res.json(buyer);
+    res.json(attach(buyer));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── DELETE buyer ─────────────────────────────────────────────────────────────
+// ── DELETE company ──────────────────────────────────────────────────────────
 router.delete('/:id', authenticate, (req, res) => {
   try {
     db.prepare('DELETE FROM company_banks WHERE buyer_id=?').run(req.params.id);
+    db.prepare('DELETE FROM company_gpxk WHERE buyer_id=?').run(req.params.id);
     db.prepare('DELETE FROM buyers WHERE id=?').run(req.params.id);
     res.json({ message: 'Đã xóa' });
   } catch (err) { res.status(500).json({ error: err.message }); }

@@ -545,6 +545,77 @@ db.exec(`
     FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS company_gpxk (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    buyer_id INTEGER NOT NULL,
+    country_type TEXT,
+    cert_no TEXT,
+    issue_date TEXT,
+    expiry_date TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS import_bls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_record_id INTEGER NOT NULL,
+    bl_seq INTEGER DEFAULT 1,
+    shipping_line TEXT, loader TEXT, bl_number TEXT,
+    eta_caimep TEXT, eta_hcm TEXT, eta_pod TEXT, notes_bill TEXT,
+    dhl_fedex_number TEXT, dhl_delivered TEXT,
+    total_cont TEXT, cont_size TEXT, total_bags REAL, gw_bl REAL, nw_bl REAL,
+    less_advance REAL, discount1 REAL, bl_other_fee REAL,
+    seller_invoice_amount REAL, notes_invoice TEXT,
+    second_payment REAL, payment_date2 TEXT,
+    final_settlement REAL, payment_date3 TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (import_record_id) REFERENCES import_records(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS export_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    export_record_id INTEGER NOT NULL,
+    item_seq INTEGER DEFAULT 1,
+    commodity TEXT,
+    cont_count REAL,
+    cont_type TEXT DEFAULT '20',
+    ctn_cont REAL,
+    packing_ctn REAL,
+    packing_unit TEXT DEFAULT 'kgs',
+    price REAL,
+    price_unit TEXT DEFAULT 'USD/LB',
+    quantity REAL,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (export_record_id) REFERENCES export_records(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS import_staff_bonuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_record_id INTEGER NOT NULL,
+    bonus_seq INTEGER DEFAULT 1,
+    rate_pct REAL,
+    rate_exchange REAL,
+    other_fee REAL,
+    payment_date TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (import_record_id) REFERENCES import_records(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS export_staff_bonuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    export_record_id INTEGER NOT NULL,
+    bonus_seq INTEGER DEFAULT 1,
+    rate_pct REAL,
+    rate_exchange REAL,
+    other_fee REAL,
+    payment_date TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (export_record_id) REFERENCES export_records(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS gpxk_turkey (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     seller TEXT NOT NULL,
@@ -654,6 +725,8 @@ addCol('export_records', 'commission2_usd_lbs', 'REAL')
 addCol('export_records', 'rate_exchange2_vnd', 'REAL')
 addCol('export_records', 'commission2_payment_date', 'TEXT')
 addCol('export_records', 'note_com2', 'TEXT')
+addCol('export_records', 'commission_other_fee', 'REAL')
+addCol('export_records', 'commission2_other_fee', 'REAL')
 // Import: new fields
 addCol('import_records', 'bl_seq', 'INTEGER DEFAULT 1')
 addCol('import_records', 'bl_number_2', 'TEXT')
@@ -661,5 +734,117 @@ addCol('import_records', 'bl_number_3', 'TEXT')
 addCol('import_records', 'note_pay', 'TEXT')
 addCol('import_records', 'shipping_line', 'TEXT')
 addCol('import_records', 'loader', 'TEXT')
+// Buyers/companies: consolidated free-text company + bank info (replaces per-field entry)
+addCol('buyers', 'company_info_en', 'TEXT')
+addCol('buyers', 'company_info_vi', 'TEXT')
+addCol('buyers', 'company_type', 'TEXT')
+addCol('company_banks', 'bank_info', 'TEXT')
+// Import: 1:2 penalty override + one-time migration guard for the
+// double_penalty sign convention flip (was negative offset, now positive)
+addCol('import_records', 'penalty_1to2', 'REAL')
+addCol('import_records', 'double_penalty_sign_migrated', 'INTEGER DEFAULT 0')
+
+// One-time (idempotent) backfill: fold old per-field buyer/bank data into the
+// new consolidated text blobs so nothing already entered gets lost.
+try {
+  const oldBuyers = db.prepare(`
+    SELECT id, buyer_name, company_address, company_vi, tax_code, email, phone
+    FROM buyers WHERE company_info_en IS NULL OR company_info_en = ''
+  `).all();
+  const fillBuyerInfo = db.prepare('UPDATE buyers SET company_info_en=?, company_info_vi=? WHERE id=?');
+  oldBuyers.forEach(b => {
+    const en = [b.buyer_name, b.company_address, b.tax_code && `Tax code: ${b.tax_code}`, b.email, b.phone]
+      .filter(Boolean).join('\n');
+    const vi = b.company_vi || null;
+    if (en || vi) fillBuyerInfo.run(en || null, vi, b.id);
+  });
+
+  const oldBanks = db.prepare(`
+    SELECT id, bank_name, account_no, swift_bic, iban, bank_branch, bank_address, currency, notes
+    FROM company_banks WHERE bank_info IS NULL OR bank_info = ''
+  `).all();
+  const fillBankInfo = db.prepare('UPDATE company_banks SET bank_info=? WHERE id=?');
+  oldBanks.forEach(bk => {
+    const info = [
+      bk.bank_name && `Bank: ${bk.bank_name}`,
+      bk.account_no && `Account No: ${bk.account_no}`,
+      bk.swift_bic && `Swift/BIC: ${bk.swift_bic}`,
+      bk.iban && `IBAN: ${bk.iban}`,
+      bk.bank_branch && `Branch: ${bk.bank_branch}`,
+      bk.bank_address && `Address: ${bk.bank_address}`,
+      bk.currency && `Currency: ${bk.currency}`,
+      bk.notes && `Notes: ${bk.notes}`,
+    ].filter(Boolean).join('\n');
+    if (info) fillBankInfo.run(info, bk.id);
+  });
+} catch (e) { /* backfill is best-effort, non-fatal */ }
+
+// One-time (idempotent, guarded by double_penalty_sign_migrated): Double
+// Penalty used to be entered as a negative offset; it's now entered as a
+// positive "points below" number, so flip the sign on already-entered values.
+try {
+  db.prepare(`
+    UPDATE import_records SET double_penalty = -double_penalty
+    WHERE (double_penalty_sign_migrated IS NULL OR double_penalty_sign_migrated = 0)
+      AND double_penalty IS NOT NULL AND double_penalty != 0
+  `).run();
+  db.prepare(`
+    UPDATE import_records SET double_penalty_sign_migrated = 1
+    WHERE double_penalty_sign_migrated IS NULL OR double_penalty_sign_migrated = 0
+  `).run();
+} catch (e) { /* non-fatal */ }
+
+// One-time (idempotent): fold each import record's old flat BL/payment
+// fields into a single import_bls row (BL #1) so existing data survives the
+// move to a repeatable multi-BL structure. Only runs for records that don't
+// have any import_bls rows yet.
+try {
+  const legacyImports = db.prepare(`
+    SELECT id, shipping_line, loader, bl_number, eta_caimep, eta_hcm, eta_pod, notes_bill,
+      dhl_fedex_number, dhl_delivered, total_cont, cont_size, total_bags, gw_bl,
+      less_advance, discount1, seller_invoice_amount, notes_invoice,
+      second_payment, payment_date2, final_settlement, payment_date3
+    FROM import_records ir
+    WHERE NOT EXISTS (SELECT 1 FROM import_bls b WHERE b.import_record_id = ir.id)
+  `).all();
+  const insertBl = db.prepare(`
+    INSERT INTO import_bls (
+      import_record_id, bl_seq, shipping_line, loader, bl_number, eta_caimep, eta_hcm, eta_pod, notes_bill,
+      dhl_fedex_number, dhl_delivered, total_cont, cont_size, total_bags, gw_bl,
+      less_advance, discount1, seller_invoice_amount, notes_invoice,
+      second_payment, payment_date2, final_settlement, payment_date3
+    ) VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  legacyImports.forEach(r => {
+    const hasAny = [r.bl_number, r.eta_caimep, r.gw_bl, r.second_payment, r.final_settlement].some(v => v != null && v !== '');
+    if (!hasAny) return; // nothing to migrate — leave record with zero BLs
+    insertBl.run(
+      r.id, r.shipping_line, r.loader, r.bl_number, r.eta_caimep, r.eta_hcm, r.eta_pod, r.notes_bill,
+      r.dhl_fedex_number, r.dhl_delivered, r.total_cont, r.cont_size, r.total_bags, r.gw_bl,
+      r.less_advance, r.discount1, r.seller_invoice_amount, r.notes_invoice,
+      r.second_payment, r.payment_date2, r.final_settlement, r.payment_date3
+    );
+  });
+} catch (e) { /* non-fatal */ }
+
+// One-time (idempotent): fold each export record's single commodity/qty/
+// packing fields into an export_items row (item #1) so existing data
+// survives the move to a repeatable multi-commodity/multi-price structure.
+try {
+  const legacyExports = db.prepare(`
+    SELECT id, commodity, qty_commodity, cont_type, ctn_cont, packing_ctn, packing_unit, quantity, price, price_unit
+    FROM export_records er
+    WHERE NOT EXISTS (SELECT 1 FROM export_items ei WHERE ei.export_record_id = er.id)
+  `).all();
+  const insertItem = db.prepare(`
+    INSERT INTO export_items (export_record_id, item_seq, commodity, cont_count, cont_type, ctn_cont, packing_ctn, packing_unit, price, price_unit, quantity)
+    VALUES (?,1,?,?,?,?,?,?,?,?,?)
+  `);
+  legacyExports.forEach(r => {
+    const hasAny = [r.commodity, r.qty_commodity, r.quantity, r.price].some(v => v != null && v !== '');
+    if (!hasAny) return;
+    insertItem.run(r.id, r.commodity, r.qty_commodity, r.cont_type, r.ctn_cont, r.packing_ctn, r.packing_unit, r.price, r.price_unit, r.quantity);
+  });
+} catch (e) { /* non-fatal */ }
 
 module.exports = db;

@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const db = require('../db/database');
 const { authenticate } = require('../middleware/auth');
+const { buildTemplateBuffer, parseUploadBuffer, bulkUpsert } = require('../utils/excel');
+const LABELS = require('../utils/labels').BWH_RECORDS;
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const FIELDS = [
   'year','bwh','no','seller','bl','status',
@@ -24,6 +29,24 @@ function vals(f, body) {
     return (v === '' || v === undefined) ? null : v;
   });
 }
+
+router.get('/template', authenticate, (req, res) => {
+  try {
+    const buf = buildTemplateBuffer(FIELDS, LABELS, 'Bwh');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="mau_nhap_lieu_kho_ngoai_quan.xlsx"');
+    res.send(buf);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/upload', authenticate, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Không có file' });
+    const rows = parseUploadBuffer(req.file.buffer, FIELDS);
+    const result = bulkUpsert(db, 'bwh_records', FIELDS, rows, req.user.id);
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 router.get('/', authenticate, (req, res) => {
   try {

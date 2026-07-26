@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight, Copy, Filter, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Pencil, Trash2, Eye, X, Save, Calculator, ChevronRight, Copy, Filter, ChevronDown, AlertTriangle, PlusCircle, Trash } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/axios'
 import { toDisplay } from '../utils/dateFormat'
+import ExcelImportExport from '../components/ExcelImportExport'
+import StaffBonusTable, { EMPTY_BONUS } from '../components/StaffBonusTable'
 
 const n = (v) => parseFloat(v) || 0
 const fmtUSD = (v) => (v == null || isNaN(v)) ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -33,20 +35,32 @@ const STATUS_COLOR = {
 }
 const statusBadge = (s) => STATUS_COLOR[s?.toLowerCase()] || 'bg-slate-100 text-slate-600'
 
+// A contract can hold several goods lines at different prices (different
+// commodities, or the same commodity split across containers at different
+// prices) — each line computes its own Quantity and value.
+function computeItem(item) {
+  const contCount = n(item.cont_count), ctnCont = n(item.ctn_cont), packingCtn = n(item.packing_ctn)
+  const quantityAuto = contCount * ctnCont * packingCtn
+  const quantity = n(item.quantity) || quantityAuto
+  const lineValue = quantity * n(item.price)
+  return { quantityAuto, quantity, lineValue }
+}
+
 function compute(f) {
-  const price = n(f.price), qty = n(f.quantity)
   const nwToPay = n(f.nw_to_pay)
+  const price = n(f.price) // price used for the NW-to-pay invoice calc (Buyer 1 Must Pay Seller)
   const lessAdv = n(f.less_advance), disc1 = n(f.discount1), fee1 = n(f.other_fee1)
-  const sellingPrice = n(f.selling_price)
   const oceanFreight = n(f.ocean_freight)
+  const sellingPrice = n(f.selling_price)
   const markUp = n(f.mark_up), disc2 = n(f.discount2), fee2 = n(f.other_fee2)
   const lessPre2 = n(f.less_prepayment2)
+  const pctInsured = n(f.pct_insured)
   const insRate = n(f.ins_rate), insVat = n(f.ins_vat)
   const exRateUsd = n(f.exchange_rate_usd_vnd)
-  const cosmosRate = n(f.cosmos_rate)
+  const cosmosRate = n(f.cosmos_rate), cosmosOtherFee = n(f.cosmos_other_fee)
   const nwBlLbs = n(f.nw_bl_lbs)
-  const commUsdLbs = n(f.commission_usd_lbs), rateExVnd = n(f.rate_exchange_vnd)
-  const comm2UsdLbs = n(f.commission2_usd_lbs), rateEx2Vnd = n(f.rate_exchange2_vnd)
+  const commUsdLbs = n(f.commission_usd_lbs), commOtherFee = n(f.commission_other_fee), rateExVnd = n(f.rate_exchange_vnd)
+  const comm2UsdLbs = n(f.commission2_usd_lbs), comm2OtherFee = n(f.commission2_other_fee), rateEx2Vnd = n(f.rate_exchange2_vnd)
 
   let ttDays = 0
   if (f.etd && f.eta) {
@@ -54,24 +68,35 @@ function compute(f) {
     if (!isNaN(d)) ttDays = d
   }
 
-  const contractValue = price * qty
-  const calcBuyer1PaySeller = price * nwToPay + lessAdv + disc1 + fee1
+  const items = f.items || []
+  const contractValue = items.reduce((s, it) => s + computeItem(it).lineValue, 0)
+  const totalCont = items.reduce((s, it) => s + n(it.cont_count), 0)
+
+  const calcBuyer1PaySeller = price * nwToPay + oceanFreight + lessAdv + disc1 + fee1
   const goodOfValue = nwToPay * sellingPrice
-  const insFeeBase = goodOfValue * insRate / 100
+  const cargoValueInsure = goodOfValue * pctInsured / 100
+  const insFeeBase = cargoValueInsure * insRate / 100
   const insFeeChecking = insFeeBase + insFeeBase * insVat / 100
   const insInVnd = insFeeChecking * exRateUsd
   const invoiceBuyer2toBuyer1 = sellingPrice * nwToPay + oceanFreight + markUp + lessPre2 + disc2 + fee2
-  const cosmosPay = cosmosRate * nwBlLbs
-  const commAmount = commUsdLbs * nwBlLbs
+  const cosmosPay = cosmosRate * nwBlLbs + cosmosOtherFee
+  const commAmount = commUsdLbs * nwBlLbs + commOtherFee
   const commInVnd = commAmount * rateExVnd
-  const commAmount2 = comm2UsdLbs * nwBlLbs
+  const commAmount2 = comm2UsdLbs * nwBlLbs + comm2OtherFee
   const commInVnd2 = commAmount2 * rateEx2Vnd
 
   return {
-    contractValue, ttDays, calcBuyer1PaySeller, goodOfValue,
+    contractValue, totalCont, ttDays, calcBuyer1PaySeller, goodOfValue, cargoValueInsure,
     insFeeChecking, insInVnd, invoiceBuyer2toBuyer1,
     cosmosPay, commAmount, commInVnd, commAmount2, commInVnd2,
   }
+}
+
+const EMPTY_ITEM = {
+  commodity: '', cont_count: '', cont_type: '20',
+  ctn_cont: '', packing_ctn: '', packing_unit: 'kgs',
+  price: '', price_unit: 'USD/LB',
+  quantity: '',
 }
 
 const EMPTY = {
@@ -79,9 +104,8 @@ const EMPTY = {
   lot_number: '', sale_contract: '',
   date: '', status: 'signed and deposited', expiry_export_cert_turkey: '',
   seller: '', buyer1: '', buyer2: '',
-  commodity: '', qty_commodity: '', cont_type: '20',
   price: '', price_unit: 'USD/LB',
-  shipment: '', packing: '', packing_ctn: '', packing_unit: 'kgs', ctn_cont: '', quantity: '', quantity_unit: 'kgs',
+  shipment: '', packing: '',
   pct1: '', pct2: '', pct3: '',
   advance_payment: '', payment_date1: '', payment2: '', payment_date2: '', payment3: '', payment_date3: '', note_pay: '',
   b2_advance_payment: '', b2_pay_date1: '', b2_payment2: '', b2_pay_date2: '', b2_payment3: '', b2_pay_date3: '', b2_note_pay: '',
@@ -91,27 +115,25 @@ const EMPTY = {
   fwd: '', ocean_freight: '', note_booking: '',
   pol: '', pod: '', shipping_line: '',
   etd: '', eta: '', bkg_details: '', container_seal: '', bl_bkg_freetime: '', seller_invoice_no: '', company_inspection: '', note_shipping: '',
-  commodity2: '', total_cont: '', ctn2: '',
   gw_bl_lbs: '', gw_bl_kgs: '', nw_bl_lbs: '', nw_bl_kgs: '',
   nw_to_pay: '', nw_to_pay_unit: 'lbs',
-  nw_to_pay_2: '', nw_to_pay_2_unit: 'lbs',
   less_advance: '', discount1: '', other_fee1: '',
   seller_invoice_amount: '', note_invoice: '',
   selling_price: '', mark_up: '', less_prepayment2: '', discount2: '', other_fee2: '', note_invoice2: '',
   ins_company: '', ins_fee: '', pct_insured: '', ins_rate: '', ins_vat: '',
   exchange_rate_usd_vnd: '', ins_duration: '', ins_payment_date: '', note_ins: '',
   cosmos_rate: '', cosmos_other_fee: '', cosmos_payment_date: '', note_cos: '',
-  commission_usd_lbs: '', rate_exchange_vnd: '', commission_payment_date: '', note_com: '',
-  commission2_usd_lbs: '', rate_exchange2_vnd: '', commission2_payment_date: '', note_com2: '',
+  commission_usd_lbs: '', commission_other_fee: '', rate_exchange_vnd: '', commission_payment_date: '', note_com: '',
+  commission2_usd_lbs: '', commission2_other_fee: '', rate_exchange2_vnd: '', commission2_payment_date: '', note_com2: '',
+  items: [],
+  staff_bonuses: [],
 }
 
 const TABS = [
   { id: 'contract', label: '① Hợp Đồng', color: 'blue' },
   { id: 'payment', label: '② Thanh Toán', color: 'green' },
-  { id: 'booking', label: '③ Booking / Shipping', color: 'violet' },
-  { id: 'invoice', label: '④ Hàng & Invoice', color: 'amber' },
-  { id: 'insurance', label: '⑤ Bảo Hiểm', color: 'teal' },
-  { id: 'cosmos_com', label: '⑥ Cosmos / COM', color: 'red' },
+  { id: 'logistics', label: '③ Vận Chuyển / Invoice / Bảo Hiểm', color: 'violet' },
+  { id: 'cosmos_com', label: '④ Cosmos / Commission', color: 'red' },
 ]
 
 const TAB_COLOR = {
@@ -199,32 +221,57 @@ function PayGroup({ title, color, fields, fld }) {
   )
 }
 
-function ColFilter({ label, values, active, onChange }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
-  const unique = [...new Set(values.filter(Boolean))].sort()
+// ── One goods/price line — repeatable, a contract can hold several ──────────
+function ItemBlock({ item, index, onChange, onRemove }) {
+  const fld = (key) => (e) => onChange(index, key, e.target.value)
+  const ic = computeItem(item)
   return (
-    <div ref={ref} className="relative inline-block">
-      <button onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded hover:bg-slate-200 transition-colors ${active ? 'bg-blue-100 text-blue-700' : 'text-slate-600'}`}>
-        {label} <ChevronDown size={11} />
-      </button>
-      {open && (
-        <div className="absolute z-30 top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[160px] max-h-56 overflow-y-auto">
-          <button onClick={() => { onChange(''); setOpen(false) }} className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 text-slate-500">— Tất cả —</button>
-          {unique.map(v => (
-            <button key={v} onClick={() => { onChange(v); setOpen(false) }}
-              className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 ${active === v ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'}`}>
-              {v}
-            </button>
-          ))}
+    <div className="border-2 border-blue-200 rounded-xl p-4 bg-blue-50/30 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-bold text-blue-700">Dòng hàng #{index + 1}</span>
+        <button onClick={() => onRemove(index)} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium">
+          <Trash size={13}/> Xóa dòng này
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Inp label="Commodity"><input className="input" value={item.commodity || ''} onChange={fld('commodity')} placeholder="VD: W320, W240..." /></Inp>
+        <div>
+          <label className="label">Số Cont + Loại</label>
+          <div className="flex gap-1">
+            <input type="number" step="0.001" className="input flex-1" value={item.cont_count || ''} onChange={fld('cont_count')} placeholder="0" />
+            <select className="select w-20" value={item.cont_type} onChange={fld('cont_type')}>
+              <option value="20">20'</option>
+              <option value="40">40'</option>
+            </select>
+          </div>
         </div>
-      )}
+        <Inp label="CTN/CONT"><input type="number" step="0.01" className="input" value={item.ctn_cont || ''} onChange={fld('ctn_cont')} /></Inp>
+        <UnitInput label="Packing/CTN" value={item.packing_ctn || ''} unitValue={item.packing_unit}
+          onChange={fld('packing_ctn')} onUnitChange={fld('packing_unit')} />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div>
+          <label className="label">Price</label>
+          <div className="flex gap-1">
+            <input type="number" step="0.0001" className="input flex-1" value={item.price || ''} onChange={fld('price')} placeholder="0.00" />
+            <select className="select w-28" value={item.price_unit} onChange={fld('price_unit')}>
+              <option value="$/lbs">$/lbs</option>
+              <option value="$/kgs">$/kgs</option>
+              <option value="USD/LB">USD/LB</option>
+              <option value="USD/KG">USD/KG</option>
+              <option value="USD/MT">USD/MT</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="label">Quantity ({item.packing_unit || 'kgs'})</label>
+          <input type="number" step="0.001" className="input" value={item.quantity || ''} onChange={fld('quantity')} placeholder={ic.quantityAuto ? ic.quantityAuto.toFixed(3) : '0.000'} />
+          <p className="text-[10px] text-slate-400 mt-0.5">Để trống = tự tính Cont × CTN/CONT × Packing. Đang áp dụng: {ic.quantity.toLocaleString('en-US', { maximumFractionDigits: 3 })}</p>
+        </div>
+        <div className="flex items-end">
+          <CalcField label="Giá trị dòng = Quantity × Price" value={fmtUSD(ic.lineValue)} color="blue" small />
+        </div>
+      </div>
     </div>
   )
 }
@@ -232,6 +279,7 @@ function ColFilter({ label, values, active, onChange }) {
 // ── VIEW DETAIL ──────────────────────────────────────────────────────────────
 function ViewDetail({ record, onBack, onEdit }) {
   const vc = compute(record)
+  const items = record.items || []
   const Row = ({ label, value, isCalc }) => (
     <div className={`flex items-start justify-between py-1.5 border-b border-slate-100 last:border-0 ${isCalc ? 'bg-blue-50 px-2 rounded my-0.5' : ''}`}>
       <span className="text-xs text-slate-500 w-56 shrink-0">{label}</span>
@@ -265,73 +313,64 @@ function ViewDetail({ record, onBack, onEdit }) {
           <Row label="Seller" value={record.seller} />
           <Row label="Buyer 1" value={record.buyer1} />
           <Row label="Buyer 2" value={record.buyer2} />
-          <Row label="Commodity" value={record.commodity} />
-          <Row label="Qty Commodity" value={`${record.qty_commodity || '—'} (${record.cont_type || '20'}' cont)`} />
-          <Row label="Price" value={`${record.price} ${record.price_unit || 'USD/LB'}`} />
           <Row label="Shipment" value={record.shipment} />
           <Row label="Packing" value={record.packing} />
-          <Row label="Packing/CTN" value={`${record.packing_ctn || '—'} ${record.packing_unit || ''}`} />
-          <Row label="CTN/CONT" value={record.ctn_cont} />
-          <Row label="Quantity" value={`${record.quantity || '—'} ${record.quantity_unit || ''}`} />
-          <Row label="✦ Contract Value" value={fmtUSD(vc.contractValue)} isCalc />
           <Row label="1st / 2nd / 3rd %" value={`${record.pct1 || '—'}% / ${record.pct2 || '—'}% / ${record.pct3 || '—'}%`} />
+          {items.length === 0 ? <div className="text-xs text-slate-400 pt-2">Chưa có dòng hàng nào</div> : items.map((it, i) => {
+            const ic = computeItem(it)
+            return (
+              <div key={it.id ?? i} className="mt-2 pt-2 border-t border-slate-100">
+                <div className="text-xs font-bold text-blue-700 mb-1">Dòng hàng #{i + 1} — {it.commodity || '(chưa có tên)'}</div>
+                <Row label="Cont / Loại" value={`${it.cont_count || '—'} × ${it.cont_type || '20'}'`} />
+                <Row label="CTN/CONT / Packing" value={`${it.ctn_cont || '—'} / ${it.packing_ctn || '—'} ${it.packing_unit || ''}`} />
+                <Row label="Price" value={`${it.price || '—'} ${it.price_unit || ''}`} />
+                <Row label="✦ Quantity" value={`${ic.quantity.toLocaleString('en-US', { maximumFractionDigits: 3 })} ${it.packing_unit || ''}`} isCalc />
+                <Row label="✦ Giá trị dòng" value={fmtUSD(ic.lineValue)} isCalc />
+              </div>
+            )
+          })}
+          <Row label="✦ Contract Value (tổng các dòng)" value={fmtUSD(vc.contractValue)} isCalc />
+          <Row label="✦ Total Cont (tổng)" value={vc.totalCont} isCalc />
         </Sec>
-        <Sec title="② Thanh Toán — Group 1" color="border-emerald-500">
-          <Row label="1st Payment ($)" value={fmtUSD(record.advance_payment)} />
-          <Row label="Payment Date 1" value={toDisplay(record.payment_date1)} />
-          <Row label="2nd Payment ($)" value={fmtUSD(record.payment2)} />
-          <Row label="Payment Date 2" value={toDisplay(record.payment_date2)} />
-          <Row label="3rd Payment ($)" value={fmtUSD(record.payment3)} />
-          <Row label="Payment Date 3" value={toDisplay(record.payment_date3)} />
+        <Sec title="② Thanh Toán" color="border-emerald-500">
+          <Row label="Group 1 — 1st/2nd/3rd Payment" value={`${fmtUSD(record.advance_payment)} / ${fmtUSD(record.payment2)} / ${fmtUSD(record.payment3)}`} />
           <Row label="NOTE PAY" value={record.note_pay} />
-          <Row label="— Group 2 1st Payment" value={fmtUSD(record.b2_advance_payment)} />
-          <Row label="— Group 2 2nd Payment" value={fmtUSD(record.b2_payment2)} />
-          <Row label="— Group 2 3rd Payment" value={fmtUSD(record.b2_payment3)} />
-          <Row label="— Group 3 1st Payment" value={fmtUSD(record.s_advance_payment)} />
-          <Row label="— Group 3 2nd Payment" value={fmtUSD(record.s_payment2)} />
-          <Row label="— Group 3 3rd Payment" value={fmtUSD(record.s_payment3)} />
-        </Sec>
-        <Sec title="③ DHL / Booking / Vận Chuyển" color="border-violet-500">
+          <Row label="Group 2 — 1st/2nd/3rd Payment" value={`${fmtUSD(record.b2_advance_payment)} / ${fmtUSD(record.b2_payment2)} / ${fmtUSD(record.b2_payment3)}`} />
+          <Row label="Group 3 — 1st/2nd/3rd Payment" value={`${fmtUSD(record.s_advance_payment)} / ${fmtUSD(record.s_payment2)} / ${fmtUSD(record.s_payment3)}`} />
           <Row label="DHL/Fedex Number" value={record.dhl_fedex_number} />
           <Row label="DHL Delivered" value={toDisplay(record.dhl_delivered)} />
           <Row label="DHL Fee (VND)" value={record.dhl_fee} />
+          <Row label="DHL Pay To" value={record.dhl_pay_to} />
+        </Sec>
+        <Sec title="③ Vận Chuyển / Invoice / Bảo Hiểm" color="border-violet-500">
           <Row label="POL / POD" value={`${record.pol || '—'} / ${record.pod || '—'}`} />
           <Row label="Shipping Line" value={record.shipping_line} />
-          <Row label="ETD" value={toDisplay(record.etd)} />
-          <Row label="ETA" value={toDisplay(record.eta)} />
+          <Row label="ETD / ETA" value={`${toDisplay(record.etd)} / ${toDisplay(record.eta)}`} />
           <Row label="✦ TT Days" value={`${vc.ttDays} ngày`} isCalc />
           <Row label="Ocean Freight ($)" value={fmtUSD(record.ocean_freight)} />
-          <Row label="Container/Seal" value={record.container_seal} />
-          <Row label="BL/BKG Number" value={record.bl_bkg_freetime} />
-          <Row label="Company Inspection" value={record.company_inspection} />
-        </Sec>
-        <Sec title="④ Hàng & Invoice" color="border-amber-500">
-          <Row label="NW on B/L (lbs)" value={record.nw_bl_lbs} />
-          <Row label="NW on B/L (kgs)" value={record.nw_bl_kgs} />
+          <Row label="NW on B/L (lbs/kgs)" value={`${record.nw_bl_lbs || '—'} / ${record.nw_bl_kgs || '—'}`} />
           <Row label={`NW to pay (${record.nw_to_pay_unit || 'lbs'})`} value={record.nw_to_pay} />
-          <Row label="Less Prepayment (-)" value={fmtUSD(record.less_advance)} />
-          <Row label="✦ Calc Buyer1 Pay Seller" value={fmtUSD(vc.calcBuyer1PaySeller)} isCalc />
+          <Row label="Price (cho Invoice)" value={`${record.price || '—'} ${record.price_unit || ''}`} />
+          <Row label="✦ Calc Buyer1 Must Pay Seller" value={fmtUSD(vc.calcBuyer1PaySeller)} isCalc note="= Price×NW to pay + Ocean Freight + Less Prepayment + Discount + Other Fee" />
           <Row label="Selling Price ($)" value={fmtUSD(record.selling_price)} />
           <Row label="✦ Invoice Buyer2→Buyer1" value={fmtUSD(vc.invoiceBuyer2toBuyer1)} isCalc />
-        </Sec>
-        <Sec title="⑤ Bảo Hiểm" color="border-teal-500">
           <Row label="INS Company" value={record.ins_company} />
-          <Row label="INS Fee ($)" value={fmtUSD(record.ins_fee)} />
           <Row label="% Insured" value={record.pct_insured ? `${record.pct_insured}%` : '—'} />
           <Row label="✦ Good of Value" value={fmtUSD(vc.goodOfValue)} isCalc />
-          <Row label="Rate (%)" value={record.ins_rate} />
-          <Row label="VAT (%)" value={record.ins_vat} />
+          <Row label="✦ Cargo Value Insure" value={fmtUSD(vc.cargoValueInsure)} isCalc />
           <Row label="✦ INS FEE checking" value={fmtUSD(vc.insFeeChecking)} isCalc />
           <Row label="✦ In VND" value={fmtVND(vc.insInVnd)} isCalc />
-          <Row label="Payment Date" value={toDisplay(record.ins_payment_date)} />
         </Sec>
-        <Sec title="⑥ Cosmos / Commission" color="border-red-500">
+        <Sec title="④ Cosmos / Commission" color="border-red-500">
           <Row label="COSMOS Rate ($)" value={fmtUSD(record.cosmos_rate)} />
+          <Row label="COSMOS Other Fee ($)" value={fmtUSD(record.cosmos_other_fee)} />
           <Row label="✦ COSMOS Pay Back" value={fmtUSD(vc.cosmosPay)} isCalc />
-          <Row label="COM1 ($/LBS)" value={fmtUSD(record.commission_usd_lbs)} />
+          <Row label="COM1 ($/LBS) — Phải thu từ Seller" value={fmtUSD(record.commission_usd_lbs)} />
+          <Row label="COM1 Other Fee ($)" value={fmtUSD(record.commission_other_fee)} />
           <Row label="✦ COM1 Amount" value={fmtUSD(vc.commAmount)} isCalc />
           <Row label="✦ COM1 In VND" value={fmtVND(vc.commInVnd)} isCalc />
-          <Row label="COM2 ($/LBS)" value={fmtUSD(record.commission2_usd_lbs)} />
+          <Row label="COM2 ($/LBS) — Phải chi" value={fmtUSD(record.commission2_usd_lbs)} />
+          <Row label="COM2 Other Fee ($)" value={fmtUSD(record.commission2_other_fee)} />
           <Row label="✦ COM2 Amount" value={fmtUSD(vc.commAmount2)} isCalc />
           <Row label="✦ COM2 In VND" value={fmtVND(vc.commInVnd2)} isCalc />
         </Sec>
@@ -347,6 +386,29 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
   const c = compute(form)
   const fld = (key) => (e) => setForm(p => ({ ...p, [key]: e.target.value }))
   const fv = (key, val) => setForm(p => ({ ...p, [key]: val }))
+  const goNext = async (tab) => { if (await onSave({ close: false })) setActiveTab(tab) }
+
+  const updateItem = (i, key, value) => setForm(p => {
+    const items = [...(p.items || [])]
+    items[i] = { ...items[i], [key]: value }
+    return { ...p, items }
+  })
+  const addItem = () => {
+    if ((form.items || []).length >= 10) { toast.error('Tối đa 10 dòng hàng'); return }
+    setForm(p => ({ ...p, items: [...(p.items || []), { ...EMPTY_ITEM }] }))
+  }
+  const removeItem = (i) => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))
+
+  const updateBonus = (i, key, value) => setForm(p => {
+    const staff_bonuses = [...(p.staff_bonuses || [])]
+    staff_bonuses[i] = { ...staff_bonuses[i], [key]: value }
+    return { ...p, staff_bonuses }
+  })
+  const addBonus = () => {
+    if ((form.staff_bonuses || []).length >= 10) { toast.error('Tối đa 10 dòng thưởng'); return }
+    setForm(p => ({ ...p, staff_bonuses: [...(p.staff_bonuses || []), { ...EMPTY_BONUS }] }))
+  }
+  const removeBonus = (i) => setForm(p => ({ ...p, staff_bonuses: p.staff_bonuses.filter((_, idx) => idx !== i) }))
 
   const lookupTurkey = async () => {
     if (!form.seller) { toast.error('Nhập tên Seller trước'); return }
@@ -421,43 +483,35 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
               <Inp label="Buyer 1"><input className="input" value={form.buyer1} onChange={fld('buyer1')} /></Inp>
               <Inp label="Buyer 2"><input className="input" value={form.buyer2} onChange={fld('buyer2')} /></Inp>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Inp label="COMMODITY"><input className="input" value={form.commodity} onChange={fld('commodity')} /></Inp>
-              <div>
-                <label className="label">Quantity Commodity + Loại cont</label>
-                <div className="flex gap-1">
-                  <input type="number" step="0.001" className="input flex-1" value={form.qty_commodity} onChange={fld('qty_commodity')} placeholder="0.000" />
-                  <select className="select w-20" value={form.cont_type} onChange={fld('cont_type')}>
-                    <option value="20">20'</option>
-                    <option value="40">40'</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="label">Price + Đơn vị</label>
-                <div className="flex gap-1">
-                  <input type="number" step="0.0001" className="input flex-1" value={form.price} onChange={fld('price')} placeholder="0.00" />
-                  <select className="select w-28" value={form.price_unit} onChange={fld('price_unit')}>
-                    <option value="$/lbs">$/lbs</option>
-                    <option value="$/kgs">$/kgs</option>
-                    <option value="USD/LB">USD/LB</option>
-                    <option value="USD/KG">USD/KG</option>
-                    <option value="USD/MT">USD/MT</option>
-                  </select>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Inp label="Shipment"><input className="input" value={form.shipment} onChange={fld('shipment')} /></Inp>
+              <Inp label="Packing (mô tả)"><input className="input" value={form.packing} onChange={fld('packing')} placeholder="VD: Jute bags 60kg" /></Inp>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Inp label="Packing"><input className="input" value={form.packing} onChange={fld('packing')} /></Inp>
-              <UnitInput label="Packing/CTN" value={form.packing_ctn} unitValue={form.packing_unit}
-                onChange={fld('packing_ctn')} onUnitChange={fld('packing_unit')} />
-              <Inp label="CTN/CONT"><input type="number" step="0.01" className="input" value={form.ctn_cont} onChange={fld('ctn_cont')} /></Inp>
-              <UnitInput label="Quantity" value={form.quantity} unitValue={form.quantity_unit}
-                onChange={fld('quantity')} onUnitChange={fld('quantity_unit')} />
+
+            {/* Goods/price lines — repeatable */}
+            <div>
+              <div className="flex items-center justify-between mb-2 border-t border-blue-100 pt-4">
+                <label className="label font-semibold text-blue-700 mb-0">HÀNG HÓA & GIÁ ({(form.items || []).length}/10 dòng)</label>
+                <button onClick={addItem} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  <PlusCircle size={14} /> Thêm dòng hàng
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mb-2">1 hợp đồng có thể có nhiều loại hàng hoặc nhiều mức giá khác nhau — mỗi dòng là 1 loại hàng/giá riêng</p>
+              <div className="space-y-3">
+                {(form.items || []).map((it, i) => (
+                  <ItemBlock key={i} item={it} index={i} onChange={updateItem} onRemove={removeItem} />
+                ))}
+                {(form.items || []).length === 0 && (
+                  <button onClick={addItem} className="w-full border-2 border-dashed border-slate-300 rounded-lg p-4 text-sm text-slate-400 hover:border-blue-400 hover:text-blue-600 transition-colors">
+                    + Thêm dòng hàng đầu tiên
+                  </button>
+                )}
+              </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-blue-50 p-3 rounded-lg">
-              <CalcField label="Contract Value = Price × Quantity" value={fmtUSD(c.contractValue)} color="blue" />
+              <CalcField label="Contract Value = tổng (Quantity × Price) các dòng hàng" value={fmtUSD(c.contractValue)} color="blue" />
+              <CalcField label="Total Cont (tổng)" value={c.totalCont} color="blue" small />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Inp label="1st (%)"><input type="number" step="0.01" className="input" value={form.pct1} onChange={fld('pct1')} placeholder="0.00" /></Inp>
@@ -465,7 +519,7 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
               <Inp label="3rd (%)"><input type="number" step="0.01" className="input" value={form.pct3} onChange={fld('pct3')} placeholder="0.00" /></Inp>
             </div>
             <div className="flex justify-end pt-2">
-              <button onClick={() => setActiveTab('payment')} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={15}/></button>
+              <button onClick={() => goNext('payment')} disabled={saving} className="btn-secondary">Tiếp: Thanh Toán <ChevronRight size={15}/></button>
             </div>
           </div>
         )}
@@ -499,18 +553,7 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
               }}
             />
 
-            <div className="flex justify-end pt-2">
-              <button onClick={() => setActiveTab('booking')} className="btn-secondary">Tiếp: Booking/Shipping <ChevronRight size={15}/></button>
-            </div>
-          </div>
-        )}
-
-        {/* ③ BOOKING / SHIPPING */}
-        {activeTab === 'booking' && (
-          <div className="space-y-5">
-            <h2 className="font-bold text-violet-700 border-b border-violet-100 pb-2">③ Booking / Vận Chuyển</h2>
-
-            {/* DHL */}
+            {/* DHL / FedEx — moved here from Booking */}
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
               <p className="text-xs font-bold text-slate-600 mb-3">DHL / FedEx</p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -524,6 +567,17 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
                 <Inp label="NOTE DHL"><input className="input" value={form.note_dhl} onChange={fld('note_dhl')} /></Inp>
               </div>
             </div>
+
+            <div className="flex justify-end pt-2">
+              <button onClick={() => goNext('logistics')} disabled={saving} className="btn-secondary">Tiếp: Vận Chuyển / Invoice / Bảo Hiểm <ChevronRight size={15}/></button>
+            </div>
+          </div>
+        )}
+
+        {/* ③ VẬN CHUYỂN / INVOICE / BẢO HIỂM — merged */}
+        {activeTab === 'logistics' && (
+          <div className="space-y-5">
+            <h2 className="font-bold text-violet-700 border-b border-violet-100 pb-2">③ Vận Chuyển / Invoice / Bảo Hiểm</h2>
 
             {/* Booking */}
             <div className="p-4 bg-violet-50 rounded-lg border border-violet-200">
@@ -573,35 +627,15 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button onClick={() => setActiveTab('invoice')} className="btn-secondary">Tiếp: Hàng & Invoice <ChevronRight size={15}/></button>
-            </div>
-          </div>
-        )}
-
-        {/* ④ HÀNG & INVOICE */}
-        {activeTab === 'invoice' && (
-          <div className="space-y-5">
-            <h2 className="font-bold text-amber-700 border-b border-amber-100 pb-2">④ Chi Tiết Hàng & Invoice</h2>
-
-            {/* Hàng */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Inp label="Commodity"><input className="input" value={form.commodity2} onChange={fld('commodity2')} /></Inp>
-              <Inp label="Total Cont (cont)"><input type="number" step="1" className="input" value={form.total_cont} onChange={fld('total_cont')} /></Inp>
-              <Inp label="CTN"><input type="number" step="1" className="input" value={form.ctn2} onChange={fld('ctn2')} /></Inp>
-            </div>
+            {/* Hàng — weights */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Inp label="GW on B/L (lbs)"><input type="number" step="0.01" className="input" value={form.gw_bl_lbs} onChange={fld('gw_bl_lbs')} /></Inp>
               <Inp label="GW on B/L (kgs)"><input type="number" step="0.01" className="input" value={form.gw_bl_kgs} onChange={fld('gw_bl_kgs')} /></Inp>
               <Inp label="NW on B/L (lbs)"><input type="number" step="0.01" className="input" value={form.nw_bl_lbs} onChange={fld('nw_bl_lbs')} /></Inp>
               <Inp label="NW on B/L (kgs)"><input type="number" step="0.01" className="input" value={form.nw_bl_kgs} onChange={fld('nw_bl_kgs')} /></Inp>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <UnitInput label="NW to pay" value={form.nw_to_pay} unitValue={form.nw_to_pay_unit}
-                onChange={fld('nw_to_pay')} onUnitChange={fld('nw_to_pay_unit')} step="0.001" />
-              <UnitInput label="NW to pay (2)" value={form.nw_to_pay_2} unitValue={form.nw_to_pay_2_unit}
-                onChange={fld('nw_to_pay_2')} onUnitChange={fld('nw_to_pay_2_unit')} step="0.001" />
-            </div>
+            <UnitInput label="NW to pay" value={form.nw_to_pay} unitValue={form.nw_to_pay_unit}
+              onChange={fld('nw_to_pay')} onUnitChange={fld('nw_to_pay_unit')} step="0.001" />
 
             {/* Invoice Buyer1 → Seller */}
             <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
@@ -613,12 +647,27 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
                 </div>
               )}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="label">Price (cho Invoice, $/NW to pay)</label>
+                  <div className="flex gap-1">
+                    <input type="number" step="0.0001" className="input flex-1" value={form.price} onChange={fld('price')} placeholder="0.00" />
+                    <select className="select w-28" value={form.price_unit} onChange={fld('price_unit')}>
+                      <option value="$/lbs">$/lbs</option>
+                      <option value="$/kgs">$/kgs</option>
+                      <option value="USD/LB">USD/LB</option>
+                      <option value="USD/KG">USD/KG</option>
+                      <option value="USD/MT">USD/MT</option>
+                    </select>
+                  </div>
+                </div>
                 <Inp label="Less Prepayment (-) ($)"><input type="number" step="0.01" className="input" value={form.less_advance} onChange={fld('less_advance')} placeholder="0.00 (số âm)" /></Inp>
                 <Inp label="Discount (-) ($)"><input type="number" step="0.01" className="input" value={form.discount1} onChange={fld('discount1')} placeholder="0.00 (số âm)" /></Inp>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-3">
                 <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={form.other_fee1} onChange={fld('other_fee1')} placeholder="0.00 (+/-)" /></Inp>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <CalcField label="Calculate Buyer 1 Must Pay Seller = Price × NW to pay + Less Prepayment + Discount + Other Fee"
+                <CalcField label="Calculate Buyer 1 Must Pay Seller = Price × NW to pay + Ocean Freight + Less Prepayment + Discount + Other Fee"
                   value={fmtUSD(c.calcBuyer1PaySeller)} color="amber"
                   editable editValue={form._override_buyer1pay} onEditChange={v => fv('_override_buyer1pay', v)} />
               </div>
@@ -656,66 +705,64 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
               </div>
             </div>
 
+            {/* Insurance */}
+            <div className="p-4 bg-teal-50 rounded-lg border border-teal-200">
+              <p className="text-xs font-bold text-teal-700 mb-3">BẢO HIỂM</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Inp label="INS Company"><input className="input" value={form.ins_company} onChange={fld('ins_company')} /></Inp>
+                <Inp label="INS Fee ($)"><input type="number" step="0.01" className="input" value={form.ins_fee} onChange={fld('ins_fee')} /></Inp>
+                <Inp label="Percentage Insured (%)"><input type="number" step="0.01" className="input" value={form.pct_insured} onChange={fld('pct_insured')} placeholder="100 hoặc 110" /></Inp>
+                <div className="flex items-end">
+                  <CalcField label="Good of Value = NW to pay × Selling Price" value={fmtUSD(c.goodOfValue)} color="teal" small />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
+                <div className="flex items-end">
+                  <CalcField label="Cargo Value Insure = Good of Value × % Insured" value={fmtUSD(c.cargoValueInsure)} color="teal" small />
+                </div>
+                <Inp label="Rate (%)"><input type="number" step="0.0001" className="input" value={form.ins_rate} onChange={fld('ins_rate')} placeholder="0.00" /></Inp>
+                <Inp label="VAT (%)"><input type="number" step="0.01" className="input" value={form.ins_vat} onChange={fld('ins_vat')} placeholder="0.00" /></Inp>
+                <div className="flex items-end">
+                  <CalcField label="INS FEE checking = Cargo Value Insure × Rate + (× Rate) × VAT"
+                    value={fmtUSD(c.insFeeChecking)} color="teal" small
+                    editable editValue={form._override_insfee} onEditChange={v => fv('_override_insfee', v)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                <Inp label="Exchange Rate (USD→VND)"><input type="number" step="1" className="input" value={form.exchange_rate_usd_vnd} onChange={fld('exchange_rate_usd_vnd')} placeholder="25000" /></Inp>
+                <div className="flex items-end">
+                  <CalcField label="In VND = INS FEE checking × Exchange Rate" value={fmtVND(c.insInVnd)} color="teal" small
+                    editable editValue={form._override_insvnd} onEditChange={v => fv('_override_insvnd', v)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                <Inp label="Duration"><input className="input" value={form.ins_duration} onChange={fld('ins_duration')} /></Inp>
+                <DateInp label="INS Payment Date" value={form.ins_payment_date} onChange={fld('ins_payment_date')} />
+                <Inp label="NOTE INS"><input className="input" value={form.note_ins} onChange={fld('note_ins')} /></Inp>
+              </div>
+            </div>
+
             <div className="flex justify-end pt-2">
-              <button onClick={() => setActiveTab('insurance')} className="btn-secondary">Tiếp: Bảo Hiểm <ChevronRight size={15}/></button>
+              <button onClick={() => goNext('cosmos_com')} disabled={saving} className="btn-secondary">Tiếp: Cosmos / COM <ChevronRight size={15}/></button>
             </div>
           </div>
         )}
 
-        {/* ⑤ BẢO HIỂM */}
-        {activeTab === 'insurance' && (
-          <div className="space-y-5">
-            <h2 className="font-bold text-teal-700 border-b border-teal-100 pb-2">⑤ Bảo Hiểm</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Inp label="INS Company"><input className="input" value={form.ins_company} onChange={fld('ins_company')} /></Inp>
-              <Inp label="INS Fee ($)"><input type="number" step="0.01" className="input" value={form.ins_fee} onChange={fld('ins_fee')} /></Inp>
-              <Inp label="Percentage Insured (%)"><input type="number" step="0.01" className="input" value={form.pct_insured} onChange={fld('pct_insured')} placeholder="100" /></Inp>
-              <div className="flex items-end">
-                <CalcField label="Good of Value = NW to pay × Selling Price" value={fmtUSD(c.goodOfValue)} color="teal" small />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Inp label="Rate (%)"><input type="number" step="0.0001" className="input" value={form.ins_rate} onChange={fld('ins_rate')} placeholder="0.00" /></Inp>
-              <Inp label="VAT (%)"><input type="number" step="0.01" className="input" value={form.ins_vat} onChange={fld('ins_vat')} placeholder="0.00" /></Inp>
-              <div className="flex items-end col-span-2">
-                <CalcField label="INS FEE checking = Good of Value × Rate + (Good of Value × Rate) × VAT"
-                  value={fmtUSD(c.insFeeChecking)} color="teal" small
-                  editable editValue={form._override_insfee} onEditChange={v => fv('_override_insfee', v)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Inp label="Exchange Rate (USD→VND)"><input type="number" step="1" className="input" value={form.exchange_rate_usd_vnd} onChange={fld('exchange_rate_usd_vnd')} placeholder="25000" /></Inp>
-              <div className="flex items-end">
-                <CalcField label="In VND = INS FEE checking × Exchange Rate" value={fmtVND(c.insInVnd)} color="teal" small
-                  editable editValue={form._override_insvnd} onEditChange={v => fv('_override_insvnd', v)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Inp label="Duration"><input className="input" value={form.ins_duration} onChange={fld('ins_duration')} /></Inp>
-              <DateInp label="INS Payment Date" value={form.ins_payment_date} onChange={fld('ins_payment_date')} />
-              <Inp label="NOTE INS"><input className="input" value={form.note_ins} onChange={fld('note_ins')} /></Inp>
-            </div>
-            <div className="flex justify-end pt-2">
-              <button onClick={() => setActiveTab('cosmos_com')} className="btn-secondary">Tiếp: Cosmos / COM <ChevronRight size={15}/></button>
-            </div>
-          </div>
-        )}
-
-        {/* ⑥ COSMOS & COMMISSION */}
+        {/* ④ COSMOS & COMMISSION */}
         {activeTab === 'cosmos_com' && (
           <div className="space-y-5">
-            <h2 className="font-bold text-red-700 border-b border-red-100 pb-2">⑥ Cosmos & Commission</h2>
+            <h2 className="font-bold text-red-700 border-b border-red-100 pb-2">④ Cosmos & Commission</h2>
 
             {/* COSMOS */}
             <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-xs font-bold text-blue-700 mb-3">COSMOS PAY BACK MS NHI</p>
+              <p className="text-xs font-bold text-blue-700 mb-3">COSMOS PAY BACK MS NHI (Phải thu)</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Inp label="Rate ($)"><input type="number" step="0.0001" className="input" value={form.cosmos_rate} onChange={fld('cosmos_rate')} /></Inp>
+                <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={form.cosmos_other_fee} onChange={fld('cosmos_other_fee')} placeholder="0.00" /></Inp>
                 <div className="flex items-end">
-                  <CalcField label="COSMOS Pay Back = Rate × NW on B/L (lbs)" value={fmtUSD(c.cosmosPay)} color="blue" small
+                  <CalcField label="COSMOS Pay Back = Rate × NW on B/L (lbs) + Other Fee" value={fmtUSD(c.cosmosPay)} color="blue" small
                     editable editValue={form._override_cosmos} onEditChange={v => fv('_override_cosmos', v)} />
                 </div>
-                <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={form.cosmos_other_fee} onChange={fld('cosmos_other_fee')} placeholder="0.00" /></Inp>
                 <DateInp label="Payment Date" value={form.cosmos_payment_date} onChange={fld('cosmos_payment_date')} />
               </div>
               <div className="mt-3">
@@ -725,20 +772,21 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
 
             {/* COMMISSION 1 */}
             <div className="p-4 bg-teal-50 rounded-lg border border-teal-200">
-              <p className="text-xs font-bold text-teal-700 mb-3">HOA HỒNG 1 (COM1)</p>
+              <p className="text-xs font-bold text-teal-700 mb-3">HOA HỒNG PHẢI THU TỪ SELLER (COM1)</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Inp label="Commission ($/LBS)"><input type="number" step="0.0001" className="input" value={form.commission_usd_lbs} onChange={fld('commission_usd_lbs')} /></Inp>
+                <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={form.commission_other_fee} onChange={fld('commission_other_fee')} placeholder="0.00" /></Inp>
                 <div className="flex items-end">
-                  <CalcField label="Amount = Commission × NW on B/L (lbs)" value={fmtUSD(c.commAmount)} color="teal" small
+                  <CalcField label="Amount = Commission × NW on B/L (lbs) + Other Fee" value={fmtUSD(c.commAmount)} color="teal" small
                     editable editValue={form._override_comm} onEditChange={v => fv('_override_comm', v)} />
                 </div>
                 <Inp label="Rate of Exchange (VND)"><input type="number" step="1" className="input" value={form.rate_exchange_vnd} onChange={fld('rate_exchange_vnd')} placeholder="25000" /></Inp>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
                 <div className="flex items-end">
                   <CalcField label="In VND = Amount × Rate" value={fmtVND(c.commInVnd)} color="teal" small
                     editable editValue={form._override_commvnd} onEditChange={v => fv('_override_commvnd', v)} />
                 </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                 <DateInp label="Payment Date" value={form.commission_payment_date} onChange={fld('commission_payment_date')} />
                 <Inp label="Note COM1"><input className="input" value={form.note_com} onChange={fld('note_com')} /></Inp>
               </div>
@@ -746,32 +794,65 @@ function EntryForm({ editId, form, setForm, onSave, onCancel, saving }) {
 
             {/* COMMISSION 2 */}
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-              <p className="text-xs font-bold text-slate-700 mb-3">HOA HỒNG 2 (COM2)</p>
+              <p className="text-xs font-bold text-slate-700 mb-3">HOA HỒNG PHẢI CHI (COM2)</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Inp label="Commission ($/LBS)"><input type="number" step="0.0001" className="input" value={form.commission2_usd_lbs} onChange={fld('commission2_usd_lbs')} /></Inp>
+                <Inp label="Other Fee ($)"><input type="number" step="0.01" className="input" value={form.commission2_other_fee} onChange={fld('commission2_other_fee')} placeholder="0.00" /></Inp>
                 <div className="flex items-end">
-                  <CalcField label="Amount = Commission × NW on B/L (lbs)" value={fmtUSD(c.commAmount2)} color="blue" small
+                  <CalcField label="Amount = Commission × NW on B/L (lbs) + Other Fee" value={fmtUSD(c.commAmount2)} color="blue" small
                     editable editValue={form._override_comm2} onEditChange={v => fv('_override_comm2', v)} />
                 </div>
                 <Inp label="Rate of Exchange (VND)"><input type="number" step="1" className="input" value={form.rate_exchange2_vnd} onChange={fld('rate_exchange2_vnd')} placeholder="25000" /></Inp>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
                 <div className="flex items-end">
                   <CalcField label="In VND = Amount × Rate" value={fmtVND(c.commInVnd2)} color="blue" small
                     editable editValue={form._override_comm2vnd} onEditChange={v => fv('_override_comm2vnd', v)} />
                 </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                 <DateInp label="Payment Date" value={form.commission2_payment_date} onChange={fld('commission2_payment_date')} />
                 <Inp label="Note COM2"><input className="input" value={form.note_com2} onChange={fld('note_com2')} /></Inp>
               </div>
             </div>
 
+            <StaffBonusTable rows={form.staff_bonuses} onChange={updateBonus} onAdd={addBonus} onRemove={removeBonus} contractValue={c.contractValue} />
+
             <div className="flex justify-between pt-4 border-t">
-              <button onClick={() => setActiveTab('insurance')} className="btn-secondary">← Bảo Hiểm</button>
+              <button onClick={() => setActiveTab('logistics')} className="btn-secondary">← Vận Chuyển / Invoice / Bảo Hiểm</button>
               <button onClick={onSave} disabled={saving} className="btn-primary"><Save size={15}/> {saving ? 'Đang lưu...' : '💾 Lưu toàn bộ'}</button>
             </div>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function ColFilter({ label, values, active, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const unique = [...new Set(values.filter(Boolean))].sort()
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded hover:bg-slate-200 transition-colors ${active ? 'bg-blue-100 text-blue-700' : 'text-slate-600'}`}>
+        {label} <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="absolute z-30 top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[160px] max-h-56 overflow-y-auto">
+          <button onClick={() => { onChange(''); setOpen(false) }} className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 text-slate-500">— Tất cả —</button>
+          {unique.map(v => (
+            <button key={v} onClick={() => { onChange(v); setOpen(false) }}
+              className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 ${active === v ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'}`}>
+              {v}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -803,9 +884,11 @@ export default function ExportEntry() {
   useEffect(() => { load() }, [load])
 
   const openCreate = () => { setForm(EMPTY); setEditId(null); setShowForm(true) }
-  const openEdit = (r) => { setForm({ ...EMPTY, ...r }); setEditId(r.id); setShowForm(true) }
+  const openEdit = (r) => { setForm({ ...EMPTY, ...r, items: r.items && r.items.length > 0 ? r.items : [], staff_bonuses: r.staff_bonuses || [] }); setEditId(r.id); setShowForm(true) }
   const openCopy = (r) => {
     const copy = { ...EMPTY, ...r, id: undefined,
+      items: r.items && r.items.length > 0 ? r.items : [],
+      staff_bonuses: r.staff_bonuses || [],
       lot_number: (Number(r.lot_number) || 1) + 1,
       advance_payment: '', payment_date1: '', payment2: '', payment_date2: '', payment3: '', payment_date3: '',
       b2_advance_payment: '', b2_pay_date1: '', b2_payment2: '', b2_pay_date2: '', b2_payment3: '', b2_pay_date3: '',
@@ -819,17 +902,18 @@ export default function ExportEntry() {
   }
   const openView = async (r) => { const res = await api.get(`/export-records/${r.id}`); setViewRecord(res.data) }
 
-  const save = async () => {
-    if (!form.sale_contract) { toast.error('Vui lòng nhập Sale Contract'); return }
+  const save = async (opts = {}) => {
+    if (!form.sale_contract) { toast.error('Vui lòng nhập Sale Contract'); return false }
     setSaving(true)
     const payload = { ...form }
     Object.keys(payload).filter(k => k.startsWith('_override_')).forEach(k => delete payload[k])
     try {
-      if (editId) await api.put(`/export-records/${editId}`, payload)
-      else await api.post('/export-records', payload)
-      toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới')
-      setShowForm(false); load()
-    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu') }
+      const res = editId ? await api.put(`/export-records/${editId}`, payload) : await api.post('/export-records', payload)
+      if (!editId && res.data?.id) setEditId(res.data.id)
+      if (opts.close === false) toast.success('Đã lưu', { duration: 1200 })
+      else { toast.success(editId ? 'Đã cập nhật' : 'Đã tạo mới'); setShowForm(false); load() }
+      return true
+    } catch (e) { toast.error(e.response?.data?.error || 'Lỗi lưu'); return false }
     finally { setSaving(false) }
   }
 
@@ -842,12 +926,14 @@ export default function ExportEntry() {
   if (viewRecord) return <ViewDetail record={viewRecord} onBack={() => setViewRecord(null)} onEdit={(r) => { openEdit(r); setViewRecord(null) }} />
   if (showForm) return <EntryForm editId={editId} form={form} setForm={setForm} onSave={save} onCancel={() => setShowForm(false)} saving={saving} />
 
-  const nv = (v) => parseFloat(v) || 0
+  const contractValueOf = (r) => (r.items || []).reduce((s, it) => s + computeItem(it).lineValue, 0)
+  const commoditiesOf = (r) => (r.items || []).map(it => it.commodity).filter(Boolean)
+
   const filtered = records.filter(r => {
     if (filterYear && String(r.year) !== filterYear) return false
     if (filterSeller && r.seller !== filterSeller) return false
     if (filterBuyer1 && r.buyer1 !== filterBuyer1) return false
-    if (filterCommodity && r.commodity !== filterCommodity) return false
+    if (filterCommodity && !commoditiesOf(r).includes(filterCommodity)) return false
     return true
   })
 
@@ -860,6 +946,7 @@ export default function ExportEntry() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input placeholder="Tìm SC, seller, buyer..." value={search} onChange={e => setSearch(e.target.value)} className="input pl-9 w-64" />
           </div>
+          <ExcelImportExport resource="export-records" filename="mau_nhap_lieu_export" onImported={load} />
           <button onClick={openCreate} className="btn-primary"><Plus size={15}/> Nhập mới</button>
         </div>
       </div>
@@ -870,7 +957,7 @@ export default function ExportEntry() {
           { label: 'Signed & Deposited', value: records.filter(r => r.status === 'signed and deposited').length, color: 'text-emerald-700' },
           { label: 'Processing', value: records.filter(r => r.status === 'processing').length, color: 'text-blue-700' },
           { label: 'Cancel', value: records.filter(r => r.status === 'cancel').length, color: 'text-red-700' },
-          { label: 'Contract Value', value: `$${records.reduce((s,r) => s + nv(r.price)*nv(r.quantity), 0).toLocaleString('en-US',{maximumFractionDigits:0})}`, color: 'text-amber-700' },
+          { label: 'Contract Value', value: `$${records.reduce((s,r) => s + contractValueOf(r), 0).toLocaleString('en-US',{maximumFractionDigits:0})}`, color: 'text-amber-700' },
         ].map(k => (
           <div key={k.label} className="card p-4">
             <div className="text-xs text-slate-500">{k.label}</div>
@@ -887,7 +974,7 @@ export default function ExportEntry() {
           <ColFilter label="Status" values={records.map(r => r.status)} active={filterStatus} onChange={setFilterStatus} />
           <ColFilter label="Seller" values={records.map(r => r.seller)} active={filterSeller} onChange={setFilterSeller} />
           <ColFilter label="Buyer 1" values={records.map(r => r.buyer1)} active={filterBuyer1} onChange={setFilterBuyer1} />
-          <ColFilter label="Commodity" values={records.map(r => r.commodity)} active={filterCommodity} onChange={setFilterCommodity} />
+          <ColFilter label="Commodity" values={records.flatMap(commoditiesOf)} active={filterCommodity} onChange={setFilterCommodity} />
           {(filterYear || filterStatus || filterSeller || filterBuyer1 || filterCommodity) && (
             <button onClick={() => { setFilterYear(''); setFilterStatus(''); setFilterSeller(''); setFilterBuyer1(''); setFilterCommodity('') }}
               className="text-xs text-red-600 hover:underline ml-2">✕ Xóa filter</button>
@@ -906,7 +993,7 @@ export default function ExportEntry() {
               <th className="table-head">Seller</th>
               <th className="table-head">Buyer1</th>
               <th className="table-head">Commodity</th>
-              <th className="table-head">Price / Unit</th>
+              <th className="table-head bg-blue-50 text-blue-700">Contract Value</th>
               <th className="table-head bg-blue-50 text-blue-700">Status</th>
               <th className="table-head">ETD</th>
               <th className="table-head"></th>
@@ -917,7 +1004,9 @@ export default function ExportEntry() {
                 <div className="text-4xl mb-2">📤</div>
                 <div>Chưa có dữ liệu {records.length > 0 ? '(filter đang ẩn kết quả)' : '—'} <button onClick={openCreate} className="text-blue-600 hover:underline ml-1">Nhập mới</button></div>
               </td></tr> :
-              filtered.map((r, i) => (
+              filtered.map((r, i) => {
+                const commodities = commoditiesOf(r)
+                return (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="table-cell text-xs text-slate-400">{i + 1}</td>
                   <td className="table-cell font-mono text-xs text-blue-600 font-bold">{r.sale_contract || '—'}</td>
@@ -926,11 +1015,12 @@ export default function ExportEntry() {
                   <td className="table-cell text-xs">{r.agency || '—'}</td>
                   <td className="table-cell font-medium text-sm">{r.seller || '—'}</td>
                   <td className="table-cell text-sm">{r.buyer1 || '—'}</td>
-                  <td className="table-cell text-xs">{r.commodity || '—'}</td>
                   <td className="table-cell text-xs">
-                    <div className="font-medium">{r.price || '—'}</div>
-                    <div className="text-slate-400">{r.price_unit || 'USD/LB'}</div>
+                    {commodities.length === 0 ? '—' : (
+                      <>{commodities[0]}{commodities.length > 1 && <span className="ml-1 px-1.5 py-0.5 bg-slate-200 rounded text-[10px]">+{commodities.length - 1}</span>}</>
+                    )}
                   </td>
+                  <td className="table-cell bg-blue-50 font-bold text-blue-700">{fmtUSD(contractValueOf(r))}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(r.status)}`}>{r.status || '—'}</span>
                   </td>
@@ -944,7 +1034,7 @@ export default function ExportEntry() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
